@@ -46,11 +46,11 @@ header.top .wrap{display:grid;grid-template-columns:auto 1fr auto;align-items:ce
 .mark i{position:absolute;inset:0;-webkit-mask-size:contain;mask-size:contain;-webkit-mask-repeat:no-repeat;mask-repeat:no-repeat;-webkit-mask-position:left center;mask-position:left center}
 .mark i.ink{background:currentColor} .mark i.grn{background:var(--brand)}
 .logo{width:100px;aspect-ratio:520/289}
-.logo i.ink{-webkit-mask-image:url('img/logo-ink.png');mask-image:url('img/logo-ink.png')}
-.logo i.grn{-webkit-mask-image:url('img/logo-green.png');mask-image:url('img/logo-green.png')}
+.logo i.ink{-webkit-mask-image:url('logo-ink.png');mask-image:url('logo-ink.png')}
+.logo i.grn{-webkit-mask-image:url('logo-green.png');mask-image:url('logo-green.png')}
 .tagline{width:240px;max-width:100%;aspect-ratio:700/125}
-.tagline i.ink{-webkit-mask-image:url('img/tagline-ink.png');mask-image:url('img/tagline-ink.png')}
-.tagline i.grn{-webkit-mask-image:url('img/tagline-green.png');mask-image:url('img/tagline-green.png')}
+.tagline i.ink{-webkit-mask-image:url('tagline-ink.png');mask-image:url('tagline-ink.png')}
+.tagline i.grn{-webkit-mask-image:url('tagline-green.png');mask-image:url('tagline-green.png')}
 nav.main{display:flex;justify-content:center;gap:6px;flex-wrap:wrap}
 nav.main a{font-weight:500;font-size:1rem;color:var(--ink);text-decoration:none;padding:10px 16px;border-bottom:2px solid transparent}
 nav.main a:hover{color:var(--link)}

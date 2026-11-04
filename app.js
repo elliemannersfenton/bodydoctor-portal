@@ -132,7 +132,10 @@ function h(tag, props, ...kids){
 }
 const W = (...kids) => h("div",{class:"wrap"},...kids);
 const searchIcon = () => { const t = document.createElement("template"); t.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>'; return t.content.firstChild; };
-const safeSrc = p => (typeof p === "string" && (/^assets\/img\/[A-Za-z0-9._-]+$/.test(p) || (p.startsWith(PHOTO_BASE) && /^[A-Za-z0-9._-]+$/.test(p.slice(PHOTO_BASE.length))))) ? p : null;
+// Bundled photos sit next to index.html (saved in the database as assets/img/name.webp); uploads are Supabase links.
+const safeSrc = p => { if (typeof p !== "string") return null;
+  const m = p.match(/^(?:assets\/img\/)?([A-Za-z0-9._-]+\.(?:webp|png|jpe?g|gif))$/); if (m) return m[1];
+  return (p.startsWith(PHOTO_BASE) && /^[A-Za-z0-9._-]+$/.test(p.slice(PHOTO_BASE.length))) ? p : null; };
 const photo = (src, alt) => safeSrc(src) ? h("div",{class:"photo"},h("img",{src:safeSrc(src),alt:alt||"",loading:"lazy"})) : null;
 const slug = s => String(s).toLowerCase().replace(/&/g,"and").replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");
 const terms = () => S.q.toLowerCase().split(/\s+/).filter(t => t.length > 1 || /\d/.test(t));
