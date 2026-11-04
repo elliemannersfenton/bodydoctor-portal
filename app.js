@@ -600,7 +600,7 @@ function signInView(msg){
     h("label",null, team ? "Team password" : "Password", pw),
     team ? h("label",null,h("span",null,"Your first name ",h("span",{class:"help",text:"shown on notes you post"})), name) : null,
     btn,
-    h("button",{class:"link",type:"button",style:"align-self:flex-start",text: team ? "I'm an editor" : "Back to team sign-in",onclick:() => { S.authMode = team ? "editor" : "team"; signInView(); }}),
+    team ? null : h("button",{class:"link",type:"button",style:"align-self:flex-start",text:"Back to team sign-in",onclick:() => { S.authMode = "team"; signInView(); }}),
     h("p",{class:"hint",text: team ? "Don't know the team password? Ask your manager." : "Forgotten your editor password? Ask whoever set up the portal to reset it in Supabase."}));
   form.addEventListener("submit", async e => {
     e.preventDefault(); err.hidden = true; btn.disabled = true;
@@ -624,8 +624,10 @@ async function afterSignIn(){
   document.body.classList.remove("auth");
   shell(true);
   const editor = role === "editor";
-  $("#who").textContent = editor ? (session.user.email + " · Editor") : (myName() ? myName() + " · Team" : "Team");
-  $("#editorBtn").hidden = editor; $("#pwBtn").hidden = !editor;
+  const isTeam = (session.user.email || "").toLowerCase() === String(CFG.TEAM_EMAIL || "").toLowerCase();
+  // Shared team login: show the person's name; never offer to change the shared password from here.
+  $("#who").textContent = isTeam ? (myName() || "Team") : (session.user.email + (editor ? " · Editor" : ""));
+  $("#editorBtn").hidden = true; $("#pwBtn").hidden = isTeam || !editor;
   readHash(); render(); await load();
   startLive();
 }
