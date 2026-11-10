@@ -3,8 +3,11 @@
 "use strict";
 const CFG = window.PORTAL_CONFIG || {};
 const LEVEL = { viewer:1, contributor:2, editor:3, admin:4 };
-const S = { products:[], faqs:[], notes:[], topics:[], me:null, loaded:false, q:"", route:"home",
-  noteFilter:"all", editingFaq:null, offline:false, draft:null, authMode:"team" };
+const S = { products:[], faqs:[], notes:[], topics:[], specs:[], specsMissing:false, me:null, loaded:false, q:"", route:"home",
+  noteFilter:"all", editingFaq:null, offline:false, draft:null, authMode:"team",
+  specBrand:"all", specQ:"", specCheck:false, specImport:null,
+  amazon:[], amzLoaded:false, amzMissing:false, amzError:null, amzQ:"", amzBrand:"all", amzStatus:"live", amzShowAll:false, amzRow:{}, amzText:{}, amzImport:null };
+const SP = window.TBDSpecs;
 const $ = (s, r=document) => r.querySelector(s);
 const main = $("#main");
 const lvl = () => LEVEL[S.me?.role] || 0;
@@ -78,6 +81,22 @@ async function api(action, body){
       chk(await sb.storage.from("photos").upload(path, file, { contentType: file.type, upsert:false }));
       return { path: PHOTO_BASE + path };
     }
+    case "specs_import": {
+      const now = new Date().toISOString();
+      const rows = body.specs.map(x => { const { warnings, ...data } = x.data; return { sku:x.sku, brand:x.brand, family:x.family, name:x.name, sort:x.sort, data, source: body.source || "", updated_at: now }; });
+      for (let i = 0; i < rows.length; i += 200) chk(await sb.from("specs").upsert(rows.slice(i, i + 200)));
+      if (body.removed?.length) chk(await sb.from("specs").delete().in("sku", body.removed));
+      return {};
+    }
+    case "amazon_import": {
+      const now = new Date().toISOString(), TEXT = ["title","desc","bullet1","bullet2","bullet3","bullet4","bullet5"];
+      const rows = body.listings.map(x => { const data = {}, listing = {};
+        for (const [k, v] of Object.entries(x.data)){ if (v == null || k === "warnings") continue; (TEXT.includes(k) ? listing : data)[k] = v; }
+        return { id:x.id, asin:x.asin, code:x.code, name:x.name, brand:x.brand, sort:x.sort, data, listing, source: body.source || "", updated_at: now }; });
+      for (let i = 0; i < rows.length; i += 100) chk(await sb.from("amazon").upsert(rows.slice(i, i + 100)));
+      for (let i = 0; i < (body.removed || []).length; i += 100) chk(await sb.from("amazon").delete().in("id", body.removed.slice(i, i + 100)));
+      return {};
+    }
     case "password": return chk(await sb.auth.updateUser({ password: body.new }));
     default: throw new Error("Unknown request.");
   }
@@ -99,12 +118,21 @@ async function load(){
         sb.from("topics").select("*"),
         sb.from("notes").select("*").order("created_at", { ascending:false }).limit(1000)]);
       rowsToState(chk(p), chk(f), chk(t), chk(n));
+      await loadSpecs();
       S.loaded = true; S.offline = false;
       render();
     } catch(e){ S.offline = true; if (S.loaded) render(); else main.replaceChildren(W(h("div",{class:"band"},h("div",{class:"empty",text:friendly(e)})))); }
     finally { loading = null; }
   })();
   return loading;
+}
+// Specs live in their own table; if it isn't set up yet the rest of the portal still works.
+async function loadSpecs(){
+  if (!SP) { S.specsMissing = true; return; }
+  const r = await sb.from("specs").select("*").order("sort").order("sku");
+  if (r.error){ S.specsMissing = /relation|does not exist|schema cache|not find/i.test(r.error.message || ""); if (!S.specsMissing) throw new Error(friendly(r.error)); S.specs = []; return; }
+  S.specsMissing = false;
+  S.specs = SP.checkAll(r.data.map(x => ({ sku:x.sku, brand:x.brand || "", family:x.family || "", name:x.name || x.sku, sort:x.sort, data:{ ...(x.data || {}), gaps:(x.data || {}).gaps || {} }, source:x.source, updatedAt: Date.parse(x.updated_at) })));
 }
 let reloadT;
 const reloadSoon = () => { clearTimeout(reloadT); reloadT = setTimeout(load, 400); };
@@ -334,6 +362,7 @@ function viewProduct(id){
   const related = S.faqs.filter(f => (f.products||[]).includes(p.id));
   const notes = sortedNotes(S.notes.filter(n => n.topic === "p:"+p.id));
   const jump = (target, label) => h("a",{href:"#p-"+p.id,"data-jump":target,text:label});
+  const pack = productSpecBlock(p);
   return W(
     h("div",{class:"crumbs row",style:"justify-content:space-between"},h("span",null,h("a",{href:"#home",text:"Overview"})," / ",h("a",{href:"#products",text:"Instructions"})," / ",p.name),
       canEdit() ? h("a",{class:"btn small ghost",href:"#edit-"+p.id,text:"Edit product"}) : null),
@@ -342,7 +371,7 @@ function viewProduct(id){
         photo(p.photo, p.name),
         p.facts?.length ? h("dl",{class:"facts"}, p.facts.map(([k,v]) => h("div",null,h("dt",{text:k}),h("dd",{text:v})))) : null,
         h("div",null,h("div",{class:"eyebrow",style:"margin-bottom:8px",text:"On this page"}),
-          h("nav",{class:"toc"}, p.sections.map((s,i) => jump("s"+i, s.title || "Section "+(i+1))), related.length ? jump("rel","Related FAQs ("+related.length+")") : null, jump("pnotes","Staff notes"+(notes.length?" ("+notes.length+")":"")))))),
+          h("nav",{class:"toc"}, p.sections.map((s,i) => jump("s"+i, s.title || "Section "+(i+1))), pack ? jump("pack","Packing and pallet") : null, related.length ? jump("rel","Related FAQs ("+related.length+")") : null, jump("pnotes","Staff notes"+(notes.length?" ("+notes.length+")":"")))))),
       h("div",null,
         h("div",{class:"stack",style:"gap:14px;padding-bottom:12px"},
           h("div",{class:"eyebrow",text:[p.family, "Instructions for use"].filter(Boolean).join(" · ")}),
@@ -350,6 +379,7 @@ function viewProduct(id){
           h("div",{class:"row",style:"gap:8px"}, p.ref ? h("span",{class:"chip ref",text:"REF "+p.ref}) : null, p.ifu ? h("span",{class:"chip ref",text:"IFU "+p.ifu}) : null),
           p.summary ? h("p",{class:"lede"},hl(p.summary)) : null),
         p.sections.map((s,i) => sectionEl(s, "s"+i)),
+        pack,
         related.length ? h("section",{class:"sec",id:"rel"},h("h2",null,"Related FAQs"),h("div",{class:"faqs"},related.map(f => faqEl(f)))) : null,
         h("section",{class:"sec",id:"pnotes",style:"border-bottom:0"},h("h2",null,"Staff notes"),
           notes.length ? h("div",{class:"notes"},notes.map(noteEl)) : h("p",{class:"lede",text:"No notes yet. Add anything customers keep asking that isn't covered above."}),
@@ -429,6 +459,437 @@ function viewProductEditor(id){
       existing ? confirmDelete("Delete this product", async () => { await api("product_delete",{id:existing.id}); S.draft = null; toast("Product deleted"); await load(); location.hash = "products"; }) : null, err))));
 }
 
+/* ---------- product specs (packing, pallets, trade) ---------- */
+const specId = sku => String(sku).toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");
+const specBySlug = id => S.specs.find(s => specId(s.sku) === id);
+const brandsOf = list => { const m = new Map(); for (const s of list){ const b = s.brand || "Other"; m.set(b, (m.get(b)||0) + 1); } return [...m].sort((a,b) => b[1] - a[1]); };
+const valEl = (v, cls) => h("span",{class:(cls||"") + (v.gap ? " gap" : ""), text:v.text});
+const numOr = n => n == null ? null : SP.fmt(n);
+async function copyPlain(txt, ok){
+  try { await navigator.clipboard.writeText(txt); toast(ok); }
+  catch { const ta = h("textarea",{style:"position:fixed;opacity:0"}); ta.value = txt; document.body.append(ta); ta.select(); try{document.execCommand("copy"); toast(ok);}catch{toast("Copy didn't work on this computer. Select the text instead.");} ta.remove(); }
+}
+function specTiles(s, compact){
+  const d = s.data, x = SP.derived(d);
+  const tile = (label, v, sub) => h("div",{class:"tile"}, h("span",{class:"tl",text:label}), v == null ? h("b",{class:"gap",text:"Not provided"}) : h("b",{text:v}), sub ? h("small",{text:sub}) : null);
+  return h("div",{class:"tiles" + (compact ? " compact" : "")},
+    tile("Units per outer", numOr(d.outerQty)),
+    tile("Outers per pallet", numOr(x.outersPerPallet), d.outersPerLayer && d.layers ? d.outersPerLayer + " per layer × " + d.layers + " layers" : null),
+    tile("Units per pallet", numOr(x.unitsPerPallet), x.unitsPerPalletCalculated ? "Calculated" : null));
+}
+function specLadder(s){
+  const d = s.data;
+  const step = t => h("span",{class:"step",text:t});
+  const arrow = () => h("span",{class:"arr","aria-hidden":"true",text:"→"});
+  const parts = [step("1 unit")];
+  if (d.outerQty) parts.push(arrow(), step("Outer of " + SP.fmt(d.outerQty)));
+  if (d.outersPerLayer) parts.push(arrow(), step(d.outersPerLayer + " outers per layer"));
+  if (d.layers) parts.push(arrow(), step(d.layers + " layers per pallet"));
+  return parts.length > 1 ? h("div",{class:"ladder","aria-label":"How units pack"}, parts) : null;
+}
+function specFacts(rows){
+  return h("dl",{class:"facts spec-facts"}, rows.filter(Boolean).map(([k, v, note]) => h("div",null,h("dt",{text:k}),h("dd",null, valEl(v), note ? h("small",{text:note}) : null))));
+}
+function specWarnings(s, short){
+  const w = s.data.warnings || [];
+  if (!w.length) return null;
+  return h("div",{class:"callout spec-warn"},
+    h("b",{text: w.length === 1 ? "One figure needs checking" : w.length + " figures need checking"}),
+    short ? h("span",{text:" before you quote packing figures. "}, h("a",{href:"#s-"+specId(s.sku),text:"See details"})) :
+      h("ul",{class:"bul"}, w.map(t => h("li",{text:t}))),
+    short ? null : h("p",{class:"help",text:"Check with production before quoting these. Fix them in the Product Information File, then update the portal from it."}));
+}
+function specLinkedProducts(s){ return S.products.filter(p => SP.forProduct(p, [s]).length); }
+
+function viewSpecs(){
+  if (S.specsMissing) return h("section",{class:"band"},W(h("div",{class:"stack",style:"max-width:760px"},
+    h("div",null,h("div",{class:"eyebrow",text:"Packing and pallets"}),h("h1",{style:"margin-top:6px"},"Product specs")),
+    h("div",{class:"empty",text:"Product specs aren't set up yet. Whoever looks after the portal needs to run portal-update.sql in Supabase once."}))));
+  const all = S.specs;
+  const fq = S.specQ.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const inBrand = s => S.specBrand === "all" || (s.brand || "Other") === S.specBrand;
+  const inText = s => !fq.length || fq.every(t => SP.searchText(s).toLowerCase().includes(t));
+  const flagged = all.filter(s => s.data.warnings?.length);
+  const list = all.filter(s => inBrand(s) && inText(s) && (!S.specCheck || s.data.warnings?.length));
+  const newest = all.reduce((m, s) => Math.max(m, s.updatedAt || 0), 0);
+  const source = all.find(s => s.source)?.source;
+  const filter = h("input",{type:"text",id:"specFilter",value:S.specQ,placeholder:"Filter by name, SKU or barcode","aria-label":"Filter product specs",autocomplete:"off"});
+  let ft; filter.addEventListener("input", () => { clearTimeout(ft); ft = setTimeout(() => { S.specQ = filter.value; render(); }, 120); });
+  const pill = (label, on, fn) => h("button",{type:"button","aria-pressed":String(on),text:label,onclick:fn});
+  const groups = S.specBrand === "all" ? brandsOf(list).map(([b]) => b) : [S.specBrand];
+  const num = (n, calc) => n == null ? h("td",{class:"num gap",text:"–",title:"Not provided"}) : h("td",{class:"num",text:SP.fmt(n), title: calc ? "Calculated" : null});
+  const table = rows => h("div",{class:"tbl"},h("table",{class:"spec-table"},
+    h("thead",null,h("tr",null,h("th",{text:"Product"}),h("th",{class:"num",text:"Per outer"}),h("th",{class:"num hide-sm",text:"Outers per pallet"}),h("th",{class:"num"},h("span",{class:"hide-sm",text:"Units "}),"per pallet"),h("th",{class:"hide-sm",text:"Unit barcode"}))),
+    h("tbody",null, rows.map(s => { const d = s.data, x = SP.derived(d); return h("tr",null,
+      h("td",null,h("a",{href:"#s-"+specId(s.sku)},h("span",{class:"nm"},hlSpec(d.name)), d.warnings?.length ? h("span",{class:"wdot",title:"Some figures need checking","aria-label":"Some figures need checking"}) : null), h("span",{class:"mono sku"},hlSpec(s.sku))),
+      num(d.outerQty), (() => { const c = num(x.outersPerPallet); c.classList.add("hide-sm"); return c; })(), num(x.unitsPerPallet, x.unitsPerPalletCalculated),
+      h("td",{class:"mono hide-sm"}, d.ean ? hlSpec(d.ean) : h("span",{class:"gap",text:"–"}))); }))));
+  return h("section",{class:"band"},W(h("div",{class:"stack",style:"gap:26px"},
+    h("div",{class:"band-head",style:"margin-bottom:0"},
+      h("div",null,h("div",{class:"eyebrow",text:"Packing and pallets"}),h("h1",{style:"margin-top:6px"},"Product specs"),
+        h("p",{class:"lede",style:"margin-top:10px",text:"Barcodes, box quantities and pallet figures for " + all.length + " products. Open a product for sizes, weights, commodity codes and country of origin."}),
+        all.length ? h("p",{class:"help",style:"margin-top:8px",text:"From " + (source || "the Product Information File") + (newest ? " · updated " + fmtDate(newest) : "")}) : null),
+      canEdit() ? h("a",{class:"btn ghost",href:"#import-specs",text:"Update from spreadsheet"}) : null),
+    ...(!all.length ? [loadingOr("No product specs yet. An editor can add them with Update from spreadsheet.")] : [
+      h("div",{class:"spec-bar"}, filter,
+        h("div",{class:"pills"}, pill("All brands", S.specBrand === "all", () => { S.specBrand = "all"; render(); }),
+          brandsOf(all).map(([b, n]) => pill(b + " (" + n + ")", S.specBrand === b, () => { S.specBrand = b; render(); })),
+          flagged.length ? pill("Needs checking (" + flagged.length + ")", S.specCheck, () => { S.specCheck = !S.specCheck; render(); }) : null)),
+      ...(list.length ? groups.map(b => { const rows = list.filter(s => (s.brand || "Other") === b); return rows.length ? h("section",{class:"group"}, S.specBrand === "all" ? h("h2",{style:"font-size:1.3rem;margin-bottom:4px",text:b + " (" + rows.length + ")"}) : null, table(rows)) : null; })
+        : [h("div",{class:"empty",text:"No products match. Try part of the name, the SKU or the barcode."})])]))));
+}
+function hlSpec(text){
+  const t = S.specQ.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (!t.length) return hl(text);
+  text = String(text ?? "");
+  const re = new RegExp("(" + t.map(x => x.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join("|") + ")", "gi");
+  const frag = document.createDocumentFragment();
+  text.split(re).forEach((part,i) => frag.append(i % 2 ? h("mark",{text:part}) : document.createTextNode(part)));
+  return frag;
+}
+function viewSpec(id){
+  const s = specBySlug(id);
+  if (!s) return W(h("div",{class:"band"},loadingOr("That product isn't in the specs.")));
+  const d = s.data, x = SP.derived(d), sh = (f, u) => SP.show(d, f, u);
+  const linked = specLinkedProducts(s);
+  const variants = S.specs.filter(o => o !== s && o.data.ean && o.data.ean === d.ean);
+  return W(
+    h("div",{class:"crumbs"},h("a",{href:"#home",text:"Overview"})," / ",h("a",{href:"#specs",text:"Product specs"})," / ",d.name),
+    h("div",{class:"stack spec-page",style:"gap:26px;padding-bottom:56px;border-top:1px solid var(--line);padding-top:32px"},
+      h("div",{class:"stack",style:"gap:14px"},
+        h("div",{class:"eyebrow",text:[s.brand, s.family].filter(Boolean).join(" · ")}),
+        h("h1",{text:d.name}),
+        h("div",{class:"row",style:"gap:8px"}, h("span",{class:"chip ref",text:"SKU " + s.sku}), d.category ? h("span",{class:"chip",text:d.category}) : null),
+        h("div",{class:"row",style:"gap:16px"},
+          h("button",{class:"btn small",type:"button",text:"Copy packing details",onclick:() => copyPlain(SP.copyText(s), "Packing details copied")}),
+          linked.map(p => h("a",{href:"#p-"+p.id,text:"See " + p.name + " instructions"})))),
+      specWarnings(s),
+      specTiles(s),
+      specLadder(s),
+      h("div",{class:"spec-cards"},
+        h("section",{class:"card"},h("h3",null,"Unit"), specFacts([
+          ["Barcode", sh("ean")], ["Size (L × W × H)", SP.dims(d,"each")], ["Gross weight", sh("eachGross","g")], ["Net weight", sh("eachNet","g")]])),
+        h("section",{class:"card"},h("h3",null,"Outer"), specFacts([
+          ["Barcode", sh("outerGtin")], ["Units per outer", sh("outerQty")], ["Size (L × W × H)", SP.dims(d,"outer")], ["Gross weight", sh("outerGross","g")]])),
+        h("section",{class:"card"},h("h3",null,"Pallet"), specFacts([
+          ["Footprint", d.palletL && d.palletW ? {text: SP.fmt(d.palletL) + " × " + SP.fmt(d.palletW) + " mm"} : {text:"Not provided", gap:true}],
+          ["Outers per layer", sh("outersPerLayer")], ["Layers", sh("layers")],
+          ["Units per layer", x.unitsPerLayer ? {text: SP.fmt(x.unitsPerLayer)} : {text:"Not provided", gap:true}],
+          x.loadHeight ? ["Load height", {text: SP.fmt(x.loadHeight) + " mm"}, "Boxes only, calculated. Add the pallet base."] : null,
+          x.loadWeightKg && !(d.warnings || []).some(t => /^Outer weight/.test(t)) ? ["Load weight", {text: SP.fmt(Math.round(x.loadWeightKg * 10) / 10) + " kg"}, "Boxes only, calculated. Add the pallet."] : null]))),
+      h("details",{class:"faq spec-more",id:"spec-trade"},
+        h("summary",null,h("span",{class:"q",text:"Trade and compliance"})),
+        h("div",{class:"faq-body"}, specFacts([
+          ["Minimum order", sh("moq")], ["Product type", sh("category")], ["Commodity code", sh("commodity")],
+          ["Duty rate", d.duty != null ? {text: SP.fmt(d.duty) + "%"} : sh("duty")], ["Country of origin", sh("origin")],
+          ["Shelf life", d.shelfLife ? {text: d.shelfLife + " months"} : sh("shelfLife")]]))),
+      (() => { ensureAmazon(); const az = amzForSpec(s.sku); return az.length ? h("section",{class:"stack",style:"gap:10px"},
+        h("h2",{style:"font-size:1.35rem",text:"Amazon listings (" + az.length + ")"}),
+        h("div",{class:"faqs"}, az.map(g => h("a",{class:"res spec-res",href:"#a-"+g.key},
+          h("span",{class:"sku-badge mono",text:g.main.asin || g.main.code}),
+          h("div",null,h("h3",{style:"margin:0 0 4px",text:g.main.data.product || g.main.name}),h("div",{class:"row",style:"gap:6px"}, liveChip(g.main.data), AZ.isYes(g.main.data.bundle) ? h("span",{class:"chip",text:"Bundle"}) : null, h("span",{class:"snip",text: (n => n + " marketplace" + (n === 1 ? "" : "s"))(AZ.soldIn(g.main.data).length)}))))))) : null; })(),
+      variants.length ? h("p",{class:"help"},"Same unit barcode as: ", variants.flatMap((v,i) => [i ? ", " : "", h("a",{href:"#s-"+specId(v.sku),text:v.sku})])) : null));
+}
+function productSpecBlock(p){
+  if (!SP || !S.specs.length) return null;
+  const list = SP.forProduct(p, S.specs);
+  if (!list.length) return null;
+  return h("section",{class:"sec",id:"pack"},
+    h("h2",null,"Packing and pallet"),
+    h("p",{class:"help",text:"From the Product Information File. Open the full spec for barcodes, sizes, weights and trade details."}),
+    list.map(s => h("div",{class:"stack",style:"gap:10px"},
+      list.length > 1 ? h("div",{class:"eyebrow",text:s.data.name + " · " + s.sku}) : null,
+      specTiles(s, true),
+      specWarnings(s, true),
+      h("div",null,h("a",{href:"#s-"+specId(s.sku),text:"Full spec for " + s.sku + " →"})))));
+}
+
+/* spreadsheet import (editors) */
+let xlsxLib = null;
+function loadXlsx(){
+  if (window.XLSX) return Promise.resolve(window.XLSX);
+  if (xlsxLib) return xlsxLib;
+  xlsxLib = new Promise((res, rej) => {
+    const sc = h("script",{src:"https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"});
+    sc.onload = () => window.XLSX ? res(window.XLSX) : rej(new Error("The spreadsheet reader didn't load."));
+    sc.onerror = () => { xlsxLib = null; rej(new Error("Couldn't load the spreadsheet reader. Check this computer can reach cdn.jsdelivr.net.")); };
+    document.head.append(sc);
+  });
+  return xlsxLib;
+}
+async function readSpecFile(file){
+  const X = await loadXlsx();
+  const wb = X.read(await file.arrayBuffer(), { type:"array" });
+  let lastErr = null;
+  for (const name of wb.SheetNames){
+    const rows = X.utils.sheet_to_json(wb.Sheets[name], { header:1, raw:true, defval:"", blankrows:false });
+    try { return { ...SP.parseSheet(rows), sheet:name }; } catch(e){ lastErr = e; }
+  }
+  throw lastErr || new Error("That file has no sheets.");
+}
+const specKey = s => { const { warnings, ...d } = s.data; return JSON.stringify([s.brand, s.family, s.name, d]); };
+function viewSpecImport(){
+  if (!canEdit()) return W(h("div",{class:"band"},h("div",{class:"empty",text:"Only editors can update product specs."})));
+  const st = S.specImport;
+  const msg = h("span",{class:"form-msg",text: st?.error || ""});
+  const input = h("input",{type:"file",id:"specFile",accept:".xlsx,.xlsm,.xls,.csv"});
+  input.addEventListener("change", async () => {
+    const file = input.files?.[0]; if (!file) return;
+    S.specImport = { busy:true, file:file.name }; render();
+    try {
+      const r = await readSpecFile(file);
+      const old = new Map(S.specs.map(s => [s.sku, s]));
+      const added = r.specs.filter(s => !old.has(s.sku)).map(s => s.sku);
+      const changed = r.specs.filter(s => old.has(s.sku) && specKey(old.get(s.sku)) !== specKey(s)).map(s => s.sku);
+      const removed = S.specs.filter(s => !r.specs.some(n => n.sku === s.sku)).map(s => s.sku);
+      S.specImport = { file:file.name, ...r, added, changed, removed };
+    } catch(e){ S.specImport = { error: e.message }; }
+    render();
+  });
+  const list = (label, skus) => skus.length ? h("div",null,h("b",{text:label + " (" + skus.length + ")"}),h("p",{class:"help mono",text:skus.slice(0,40).join(", ") + (skus.length > 40 ? " and " + (skus.length - 40) + " more" : "")})) : null;
+  const save = h("button",{class:"btn",type:"button",text:"Save to portal",onclick: async () => {
+    save.disabled = true; msg.textContent = "";
+    try { await api("specs_import",{ specs: st.specs, removed: st.removed, source: st.file }); S.specImport = null; toast("Product specs updated"); await load(); location.hash = "specs"; }
+    catch(e){ msg.textContent = e.message; save.disabled = false; }
+  }});
+  return h("section",{class:"band"},W(h("div",{class:"editor"},
+    h("div",{class:"crumbs",style:"padding:0"},h("a",{href:"#specs",text:"Product specs"})," / Update from spreadsheet"),
+    h("div",null,h("div",{class:"eyebrow",text:"Editors"}),h("h1",{style:"margin-top:6px",text:"Update product specs"}),
+      h("p",{class:"lede",style:"margin-top:10px",text:"Choose the latest Product Information File. The portal reads the sheet with SKU and Product Name columns, shows what will change, and only saves when you confirm."})),
+    h("div",{class:"card"},
+      h("label",null,"Spreadsheet (.xlsx)", input),
+      h("p",{class:"help",text:"Columns are matched by their header names, so they can be in any order. TBC, #N/A and blank cells show as gaps. Products missing from the file are removed from the portal."}),
+      st?.busy ? h("div",{class:"status",text:"Reading " + st.file + "…"}) : null,
+      st?.error ? msg : null),
+    st?.specs ? h("div",{class:"card"},
+      h("h3",{text:"Ready to save: " + st.specs.length + " products from " + st.file}),
+      h("p",{class:"help",text:"Sheet “" + st.sheet + "”, header on row " + st.headerRow + (st.skipped ? ". Skipped " + st.skipped + " rows with no SKU or a repeated SKU." : ".")}),
+      !st.added.length && !st.changed.length && !st.removed.length ? h("div",{class:"status",text:"Nothing has changed since the last update."}) : null,
+      list("New", st.added), list("Changed", st.changed), list("Will be removed", st.removed),
+      (() => { const n = st.specs.filter(s => s.data.warnings.length).length; return n ? h("div",{class:"callout",text: n + " products have figures that don't add up. They'll be flagged in the portal so staff check before quoting them."}) : null; })(),
+      h("div",{class:"row"}, save, h("button",{class:"btn ghost",type:"button",text:"Cancel",onclick:() => { S.specImport = null; render(); }}), msg)) : null)));
+}
+
+/* ---------- Amazon listings ---------- */
+const AZ = window.TBDAmazon;
+const AMZ_TEXT = ["title","desc","bullet1","bullet2","bullet3","bullet4","bullet5"];
+const amzKey = l => specId(l.id.split("#")[0]);
+let amzLoading = null;
+function ensureAmazon(){
+  if (!AZ || S.amzLoaded || S.amzMissing || S.amzError || amzLoading) return amzLoading;
+  amzLoading = (async () => {
+    try {
+      const all = [];
+      for (let from = 0; ; from += 1000){
+        const r = await sb.from("amazon").select("id,asin,code,name,brand,sort,data,source,updated_at").order("sort").range(from, from + 999);
+        if (r.error){ if (/relation|does not exist|schema cache|not find/i.test(r.error.message || "")){ S.amzMissing = true; break; } throw new Error(friendly(r.error)); }
+        all.push(...r.data); if (r.data.length < 1000) break;
+      }
+      S.amazon = AZ.checkAll(all.map(x => ({ id:x.id, asin:x.asin || "", code:x.code || "", name:x.name || x.asin, brand:x.brand || "", sort:x.sort, data:x.data || {}, source:x.source, updatedAt: Date.parse(x.updated_at) })));
+      S.amzLoaded = true;
+    } catch(e){ S.amzError = e.message; }
+    finally { amzLoading = null; render(); }
+  })();
+  return amzLoading;
+}
+function amzGroups(){
+  if (S.amzGroupsFor === S.amazon) return S.amzGroupsCache;
+  const m = new Map();
+  for (const l of S.amazon){ const k = amzKey(l); if (!m.has(k)) m.set(k, []); m.get(k).push(l); }
+  const groups = [...m].map(([key, rows]) => { const main = rows.find(r => AZ.isYes(r.data.mainSku)) || rows[0]; return { key, rows, main }; });
+  S.amzGroupsFor = S.amazon; S.amzGroupsCache = groups;
+  return groups;
+}
+const amzForSpec = sku => S.amazon.length ? amzGroups().filter(g => g.rows.some(r => r.code.toUpperCase() === sku.toUpperCase())) : [];
+function liveChip(d){
+  if (AZ.isYes(d.discontinued)) return h("span",{class:"chip st-off",text:"Discontinued"});
+  return AZ.isYes(d.live) ? h("span",{class:"chip st-live",text:"Live"}) : h("span",{class:"chip st-off",text:"Not live"});
+}
+function marketText(v){ const s = AZ.marketState(v); return s === "sku" ? v : AZ.MARKET_TEXT[s] || v.charAt(0) + v.slice(1).toLowerCase(); }
+function loadingAmazon(){
+  if (S.amzError) return h("div",{class:"empty",text:S.amzError});
+  return h("div",{class:"empty",text:"Loading Amazon listings…"});
+}
+function amzHeader(){
+  return h("div",null,h("div",{class:"eyebrow",text:"Amazon"}),h("h1",{style:"margin-top:6px"},"Amazon listings"));
+}
+function viewAmazon(){
+  ensureAmazon();
+  if (S.amzMissing) return h("section",{class:"band"},W(h("div",{class:"stack",style:"max-width:760px"}, amzHeader(),
+    h("div",{class:"empty",text:"The Amazon section isn't set up yet. Whoever looks after the portal needs to run portal-update.sql in Supabase once."}))));
+  if (!S.amzLoaded) return h("section",{class:"band"},W(h("div",{class:"stack"}, amzHeader(), loadingAmazon())));
+  const groups = amzGroups();
+  const fq = S.amzQ.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const text = g => g.textCache || (g.textCache = g.rows.map(AZ.searchText).join(" ").toLowerCase());
+  const live = g => AZ.isYes(g.main.data.live) && !AZ.isYes(g.main.data.discontinued);
+  const expiring = g => g.rows.some(r => r.data.warnings?.some(t => /^Stock expire/.test(t)));
+  const brands = [...new Set(groups.map(g => g.main.brand || "Other"))].sort();
+  const counts = { live: groups.filter(live).length, off: groups.filter(g => !live(g)).length, exp: groups.filter(expiring).length };
+  const list = groups.filter(g => (S.amzStatus === "all" || (S.amzStatus === "live" ? live(g) : S.amzStatus === "off" ? !live(g) : expiring(g)))
+    && (S.amzBrand === "all" || (g.main.brand || "Other") === S.amzBrand) && (!fq.length || fq.every(t => text(g).includes(t))));
+  const newest = S.amazon.reduce((m, s) => Math.max(m, s.updatedAt || 0), 0);
+  const source = S.amazon.find(s => s.source)?.source;
+  const filter = h("input",{type:"text",id:"amzFilter",value:S.amzQ,placeholder:"ASIN, seller SKU, product code or barcode","aria-label":"Filter Amazon listings",autocomplete:"off"});
+  let ft; filter.addEventListener("input", () => { clearTimeout(ft); ft = setTimeout(() => { S.amzQ = filter.value; S.amzShowAll = false; render(); }, 150); });
+  const brandSel = h("select",{id:"amzBrand","aria-label":"Brand"}, h("option",{value:"all",text:"All brands"}), brands.map(b => h("option",{value:b,text:b})));
+  brandSel.value = S.amzBrand; brandSel.addEventListener("change", () => { S.amzBrand = brandSel.value; render(); });
+  const pill = (v, label) => h("button",{type:"button","aria-pressed":String(S.amzStatus === v),text:label,onclick:() => { S.amzStatus = v; S.amzShowAll = false; render(); }});
+  const shown = S.amzShowAll ? list : list.slice(0, 150);
+  const markets = d => { const s = AZ.soldIn(d); return s.length ? s.slice(0, 4).map(m => m[0].toUpperCase()).join(", ") + (s.length > 4 ? " +" + (s.length - 4) : "") : "–"; };
+  return h("section",{class:"band"},W(h("div",{class:"stack",style:"gap:26px"},
+    h("div",{class:"band-head",style:"margin-bottom:0"},
+      h("div",null,h("div",{class:"eyebrow",text:"Amazon"}),h("h1",{style:"margin-top:6px"},"Amazon listings"),
+        h("p",{class:"lede",style:"margin-top:10px",text:groups.length + " products and " + S.amazon.length + " seller SKUs across " + AZ.MARKETS.filter(m => m[0] !== "mfn").length + " marketplaces. Search by ASIN, seller SKU, product code or barcode."}),
+        S.amazon.length ? h("p",{class:"help",style:"margin-top:8px",text:"From " + (source || "the Amazon SKU Masterlist") + (newest ? " · updated " + fmtDate(newest) : "")}) : null),
+      canEdit() ? h("a",{class:"btn ghost",href:"#import-amazon",text:"Update from spreadsheet"}) : null),
+    ...(!S.amazon.length ? [h("div",{class:"empty",text:"No Amazon listings yet. An editor can add them with Update from spreadsheet."})] : [
+      h("div",{class:"spec-bar"},
+        h("div",{class:"row",style:"gap:12px;align-items:stretch"}, filter, brandSel),
+        h("div",{class:"pills"}, pill("live","Live (" + counts.live + ")"), pill("off","Not live (" + counts.off + ")"), pill("all","All (" + groups.length + ")"),
+          counts.exp ? pill("exp","Expired or expiring (" + counts.exp + ")") : null)),
+      list.length ? h("div",{class:"tbl"},h("table",{class:"spec-table amz-table"},
+        h("thead",null,h("tr",null,h("th",{text:"Product"}),h("th",{class:"hide-sm",text:"Product code"}),h("th",{text:"Status"}),h("th",{class:"hide-sm",text:"Sold in"}),h("th",{class:"hide-sm",text:"Expiry"}))),
+        h("tbody",null, shown.map(g => { const d = g.main.data; return h("tr",null,
+          h("td",null,h("a",{href:"#a-"+g.key},h("span",{class:"nm"},hlAmz(d.product || g.main.name)), g.rows.some(r => r.data.warnings?.length) ? h("span",{class:"wdot",title:"Something needs checking","aria-label":"Something needs checking"}) : null),
+            h("span",{class:"mono sku"},hlAmz(g.main.asin || "No ASIN"), g.rows.length > 1 ? " · " + g.rows.length + " seller SKUs" : "")),
+          h("td",{class:"mono hide-sm"}, g.main.code ? hlAmz(g.main.code) : h("span",{class:"gap",text:"–"})),
+          h("td",null, h("div",{class:"row",style:"gap:6px"}, liveChip(d), AZ.isYes(d.bundle) ? h("span",{class:"chip",text:"Bundle"}) : null)),
+          h("td",{class:"hide-sm"}, markets(d)),
+          h("td",{class:"hide-sm" + (d.expiryDate ? "" : " gap"), text: d.expiryDate ? AZ.fmtDate(d.expiryDate) : "–"})); }))))
+        : h("div",{class:"empty",text:"No listings match. Try the ASIN, part of the product name or a seller SKU."}),
+      list.length > shown.length ? h("div",null,h("button",{class:"btn ghost small",type:"button",text:"Show all " + list.length,onclick:() => { S.amzShowAll = true; render(); }})) : null]))));
+}
+function hlAmz(text){
+  const t = S.amzQ.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (!t.length) return hl(text);
+  text = String(text ?? "");
+  const re = new RegExp("(" + t.map(x => x.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join("|") + ")", "gi");
+  const frag = document.createDocumentFragment();
+  text.split(re).forEach((part,i) => frag.append(i % 2 ? h("mark",{text:part}) : document.createTextNode(part)));
+  return frag;
+}
+async function loadListingText(id){
+  if (S.amzText[id] !== undefined) return;
+  S.amzText[id] = null;
+  const r = await sb.from("amazon").select("listing").eq("id", id);
+  S.amzText[id] = r.error ? { error: friendly(r.error) } : (r.data?.[0]?.listing || {});
+  render();
+}
+function viewAmazonListing(key){
+  ensureAmazon();
+  if (!S.amzLoaded) return W(h("div",{class:"band"}, S.amzMissing ? h("div",{class:"empty",text:"The Amazon section isn't set up yet."}) : loadingAmazon()));
+  const g = amzGroups().find(x => x.key === key);
+  if (!g) return W(h("div",{class:"band"},h("div",{class:"empty"},"That listing isn't in the portal. ",h("a",{href:"#amazon",text:"See all Amazon listings"}))));
+  const idx = Math.min(S.amzRow[key] || g.rows.indexOf(g.main), g.rows.length - 1);
+  const l = g.rows[idx], d = l.data;
+  const spec = l.code ? S.specs.find(s => s.sku.toUpperCase() === l.code.toUpperCase()) : null;
+  const sold = AZ.soldIn(d);
+  const tile = (label, v, sub) => h("div",{class:"tile"}, h("span",{class:"tl",text:label}), v == null ? h("b",{class:"gap",text:"Not provided"}) : h("b",{text:v}), sub ? h("small",{text:sub}) : null);
+  const facts = rows => specFacts(rows);
+  const basics = ["barcode","expiryDate","route","currentRoute","regClass","transparency","primarySku","expiry"].filter(k => d[k] != null).map(k => [AZ.F.find(f => f[0] === k)[2], AZ.show(d, k)]);
+  const txt = S.amzText[l.id];
+  const textBody = () => {
+    if (txt === undefined || txt === null) return h("p",{class:"help",text:"Loading listing text…"});
+    if (txt.error) return h("p",{class:"form-msg",text:txt.error});
+    const rows = AMZ_TEXT.filter(k => txt[k]);
+    return rows.length ? h("div",{class:"stack",style:"gap:12px"},
+      txt.title ? h("p",{style:"font-weight:500"},hl(txt.title)) : null,
+      [1,2,3,4,5].some(n => txt["bullet"+n]) ? h("ul",{class:"bul"}, [1,2,3,4,5].map(n => txt["bullet"+n] ? h("li",null,hl(txt["bullet"+n])) : null)) : null,
+      txt.desc ? h("p",{class:"amz-desc"},hl(String(txt.desc).replace(/<br\s*\/?>/gi,"\n").replace(/<\/p>\s*/gi,"\n\n").replace(/<[^>]+>/g,"").replace(/&amp;/g,"&").replace(/\n{3,}/g,"\n\n").trim())) : null) : h("p",{class:"help",text:"No listing text in the masterlist for this SKU."});
+  };
+  const fold = (group, label) => {
+    const rows = AZ.F.filter(f => f[3] === group && !AMZ_TEXT.includes(f[0]) && d[f[0]] != null).map(f => [f[2], AZ.show(d, f[0])]);
+    if (group === "listing"){
+      const det = h("details",{class:"faq spec-more",id:"amz-listing"},
+        h("summary",null,h("span",{class:"q",text:label})),
+        h("div",{class:"faq-body"}, rows.length ? facts(rows) : null, textBody()));
+      det.addEventListener("toggle", () => { if (det.open) loadListingText(l.id); });
+      if (txt !== undefined) det.open = true;
+      return det;
+    }
+    if (!rows.length) return null;
+    return h("details",{class:"faq spec-more",id:"amz-"+group}, h("summary",null,h("span",{class:"q",text:label})), h("div",{class:"faq-body"}, facts(rows)));
+  };
+  return W(
+    h("div",{class:"crumbs"},h("a",{href:"#home",text:"Overview"})," / ",h("a",{href:"#amazon",text:"Amazon"})," / ",d.product || l.name),
+    h("div",{class:"stack spec-page",style:"gap:26px;padding-bottom:56px;border-top:1px solid var(--line);padding-top:32px"},
+      h("div",{class:"stack",style:"gap:14px"},
+        h("div",{class:"eyebrow",text:[l.brand, l.code].filter(Boolean).join(" · ")}),
+        h("h1",{text:d.product || l.name}),
+        h("div",{class:"row",style:"gap:8px"}, l.asin ? h("span",{class:"chip ref",text:"ASIN " + l.asin}) : null, liveChip(d), AZ.isYes(d.bundle) ? h("span",{class:"chip",text:"Bundle"}) : null, AZ.isYes(d.variation) ? h("span",{class:"chip",text:"Variation"}) : null),
+        h("div",{class:"row",style:"gap:16px"},
+          h("button",{class:"btn small",type:"button",text:"Copy listing details",onclick:() => copyPlain(AZ.copyText(l), "Listing details copied")}),
+          spec ? h("a",{href:"#s-"+specId(spec.sku),text:"See product spec for " + spec.sku}) : null,
+          l.asin && /^[A-Z0-9]{10}$/.test(l.asin) ? h("a",{href:"https://www.amazon.co.uk/dp/" + l.asin,target:"_blank",rel:"noopener",text:"Open on Amazon UK ↗"}) : null)),
+      g.rows.length > 1 ? h("div",{class:"stack",style:"gap:8px"},
+        h("div",{class:"eyebrow",text:g.rows.length + " seller SKUs for this ASIN"}),
+        h("div",{class:"pills"}, g.rows.map((r, i) => h("button",{type:"button","aria-pressed":String(i === idx),onclick:() => { S.amzRow[key] = i; render(); }},
+          r.data.uk && AZ.marketState(r.data.uk) === "sku" ? r.data.uk : r.data.mfn && AZ.marketState(r.data.mfn) === "sku" ? r.data.mfn : "Row " + (i + 1),
+          AZ.isYes(r.data.mainSku) ? " (main)" : "")))) : null,
+      (d.warnings || []).length ? h("div",{class:"callout spec-warn"}, h("b",{text: d.warnings.length === 1 ? "One thing to check" : d.warnings.length + " things to check"}), h("ul",{class:"bul"}, d.warnings.map(t => h("li",{text:t})))) : null,
+      h("div",{class:"tiles"},
+        tile("Sold in", sold.length ? sold.length + " marketplace" + (sold.length === 1 ? "" : "s") : null),
+        tile("Units per box", d.boxQty != null ? SP.fmt(d.boxQty) : null, "FBA"),
+        tile("UK RRP", d.rrp != null ? AZ.show(d,"rrp").text : null)),
+      h("section",{class:"stack",style:"gap:12px"},
+        h("h2",{style:"font-size:1.35rem",text:"Marketplaces and seller SKUs"}),
+        h("div",{class:"markets"}, AZ.MARKETS.map(([k,, label]) => { const v = d[k], st = AZ.marketState(v);
+          return h("div",{class:"mk mk-" + st}, h("span",{class:"tl",text:label}), h("b",{class: st === "sku" ? "mono" : null, text: v ? marketText(v) : "Not listed"})); }),
+          d.inFnsku ? h("div",{class:"mk mk-sku"}, h("span",{class:"tl",text:"India FNSKU"}), h("b",{class:"mono",text:d.inFnsku})) : null)),
+      basics.length ? h("section",{class:"card"},h("h3",null,"Listing basics"), facts(basics)) : null,
+      AZ.GROUPS.map(([gk, label]) => fold(gk, label))));
+}
+function amazonSearchHits(){
+  if (!AZ || !S.amzLoaded) return [];
+  return amzGroups().filter(g => g.rows.some(r => matches(AZ.searchText(r))));
+}
+
+/* spreadsheet import (editors) */
+function viewAmazonImport(){
+  if (!canEdit()) return W(h("div",{class:"band"},h("div",{class:"empty",text:"Only editors can update Amazon listings."})));
+  ensureAmazon();
+  const st = S.amzImport;
+  const msg = h("span",{class:"form-msg",text: st?.error || ""});
+  const input = h("input",{type:"file",id:"amzFile",accept:".xlsx,.xlsm,.xls,.csv"});
+  input.addEventListener("change", async () => {
+    const file = input.files?.[0]; if (!file) return;
+    S.amzImport = { busy:true, file:file.name }; render();
+    try {
+      const X = await loadXlsx();
+      const wb = X.read(await file.arrayBuffer(), { type:"array" });
+      let r = null, lastErr = null, sheet = null;
+      for (const name of wb.SheetNames){
+        const rows = X.utils.sheet_to_json(wb.Sheets[name], { header:1, raw:true, defval:"", blankrows:false });
+        try { r = AZ.parseSheet(rows); sheet = name; break; } catch(e){ lastErr = e; }
+      }
+      if (!r) throw lastErr || new Error("That file has no sheets.");
+      const old = new Set(S.amazon.map(l => l.id)), now = new Set(r.listings.map(l => l.id));
+      S.amzImport = { file:file.name, sheet, ...r, added: r.listings.filter(l => !old.has(l.id)).length, removed: S.amazon.filter(l => !now.has(l.id)).map(l => l.id) };
+    } catch(e){ S.amzImport = { error: e.message }; }
+    render();
+  });
+  const save = h("button",{class:"btn",type:"button",text:"Save to portal",onclick: async () => {
+    save.disabled = true; msg.textContent = "Saving…";
+    try { await api("amazon_import",{ listings: st.listings, removed: st.removed, source: st.file }); S.amzImport = null; S.amzLoaded = false; S.amzText = {}; toast("Amazon listings updated"); location.hash = "amazon"; ensureAmazon(); }
+    catch(e){ msg.textContent = e.message; save.disabled = false; }
+  }});
+  return h("section",{class:"band"},W(h("div",{class:"editor"},
+    h("div",{class:"crumbs",style:"padding:0"},h("a",{href:"#amazon",text:"Amazon"})," / Update from spreadsheet"),
+    h("div",null,h("div",{class:"eyebrow",text:"Editors"}),h("h1",{style:"margin-top:6px",text:"Update Amazon listings"}),
+      h("p",{class:"lede",style:"margin-top:10px",text:"Choose the latest Amazon SKU Masterlist. The portal finds the sheet with ASIN, Product Code and FBA MSKU columns, shows what will change, and only saves when you confirm."})),
+    h("div",{class:"card"},
+      h("label",null,"Spreadsheet (.xlsx)", input),
+      h("p",{class:"help",text:"Columns are matched by their header names. Keyword and browse-node columns aren't brought in. Listings missing from the file are removed from the portal."}),
+      st?.busy ? h("div",{class:"status",text:"Reading " + st.file + "…"}) : null,
+      st?.error ? msg : null),
+    st?.listings ? h("div",{class:"card"},
+      h("h3",{text:"Ready to save: " + st.listings.length + " seller SKUs from " + st.file}),
+      h("p",{class:"help",text:"Sheet “" + st.sheet + "”, header on row " + st.headerRow + ". " + new Set(st.listings.map(l => l.asin || l.id)).size + " products (ASINs)." + (st.skipped ? " Skipped " + st.skipped + " empty rows." : "")}),
+      S.amazon.length ? h("p",null, st.added + " new, " + st.removed.length + " will be removed, the rest updated.") : null,
+      (() => { const n = st.listings.filter(l => l.data.warnings.length).length; return n ? h("div",{class:"callout",text: n + " listings have expired or soon-to-expire stock or a barcode to check. They'll be flagged in the portal."}) : null; })(),
+      h("div",{class:"row"}, save, h("button",{class:"btn ghost",type:"button",text:"Cancel",onclick:() => { S.amzImport = null; render(); }}), msg)) : null)));
+}
+
 function viewFaqs(catSlug){
   const cats = categories();
   const cat = catSlug ? cats.find(c => c.slug === catSlug) : null;
@@ -468,7 +929,10 @@ function viewSearch(){
   }
   const faqHits = S.faqs.filter(f => matches(faqText(f)));
   const noteHits = S.notes.filter(n => matches(n.text + " " + topicLabel(n.topic)));
-  const total = prodHits.length + faqHits.length + noteHits.length;
+  const specHits = SP ? S.specs.filter(s => matches(SP.searchText(s))) : [];
+  ensureAmazon();
+  const amzHits = amazonSearchHits();
+  const total = prodHits.length + faqHits.length + noteHits.length + specHits.length + amzHits.length;
   return h("section",{class:"band"},W(h("div",{class:"stack",style:"gap:36px;max-width:960px"},
     h("div",null,h("div",{class:"eyebrow",text:"Search results"}),h("h1",{style:"margin-top:6px"},total ? total+" result"+(total>1?"s":"")+" for “"+S.q.trim()+"”" : "No results for “"+S.q.trim()+"”"),
       total ? null : h("p",{class:"lede",style:"margin-top:10px",text:"Try fewer or different words, such as microwave, warranty, crystals or contact lenses. If it's a new question, add it as a FAQ so the next person finds it."})),
@@ -478,6 +942,21 @@ function viewSearch(){
           const target = "p-" + r.p.id; if (S.route === target) render(); else location.hash = target; if (!pendingJump) window.scrollTo(0,0); }},
         photo(r.p.photo) || h("span"),
         h("div",null,h("div",{class:"eyebrow",text:r.p.name}),h("h3",{style:"margin:2px 0 4px"},hl(r.title)),h("div",{class:"snip"},hl(snippet(r.text))))))) : null,
+    specHits.length ? h("section",null,h("h2",{style:"margin-bottom:6px"},"Product specs ("+specHits.length+")"),
+      specHits.slice(0, 8).map(s => { const d = s.data, x = SP.derived(d);
+        const bits = [d.outerQty ? SP.fmt(d.outerQty) + " per outer" : null, x.unitsPerPallet ? SP.fmt(x.unitsPerPallet) + " per pallet" : null, d.ean ? "Barcode " + d.ean : null].filter(Boolean).join(" · ");
+        return h("a",{class:"res spec-res",href:"#s-"+specId(s.sku),onclick: e => { e.preventDefault(); resetSearch(); location.hash = "s-" + specId(s.sku); }},
+          h("span",{class:"sku-badge mono",text:s.sku}),
+          h("div",null,h("div",{class:"eyebrow",text:[s.brand, s.family].filter(Boolean).join(" · ")}),h("h3",{style:"margin:2px 0 4px"},hl(d.name)),h("div",{class:"snip"},hl(bits || "Open for packing details")))); }),
+      specHits.length > 8 ? h("p",{style:"margin-top:12px"},h("a",{href:"#specs",onclick: e => { e.preventDefault(); S.specQ = S.q.trim(); S.specBrand = "all"; resetSearch(); location.hash = "specs"; if (S.route === "specs") render(); },text:"See all "+specHits.length+" in Product specs →"})) : null) : null,
+    amzHits.length ? h("section",null,h("h2",{style:"margin-bottom:6px"},"Amazon listings ("+amzHits.length+")"),
+      amzHits.slice(0, 8).map(g => { const d = g.main.data;
+        const bits = [AZ.isYes(d.live) ? "Live" : "Not live", AZ.isYes(d.bundle) ? "Bundle" : null, g.main.code, AZ.soldIn(d).length ? "Sold in " + AZ.soldIn(d).length + " marketplace" + (AZ.soldIn(d).length === 1 ? "" : "s") : null].filter(Boolean).join(" · ");
+        return h("a",{class:"res spec-res",href:"#a-"+g.key,onclick: e => { e.preventDefault(); resetSearch(); location.hash = "a-" + g.key; }},
+          h("span",{class:"sku-badge mono",text:g.main.asin || g.main.code}),
+          h("div",null,h("div",{class:"eyebrow",text:"Amazon" + (g.main.brand ? " · " + g.main.brand : "")}),h("h3",{style:"margin:2px 0 4px"},hl(d.product || g.main.name)),h("div",{class:"snip"},hl(bits)))); }),
+      amzHits.length > 8 ? h("p",{style:"margin-top:12px"},h("a",{href:"#amazon",onclick: e => { e.preventDefault(); S.amzQ = S.q.trim(); S.amzStatus = "all"; S.amzBrand = "all"; resetSearch(); location.hash = "amazon"; if (S.route === "amazon") render(); },text:"See all "+amzHits.length+" in Amazon →"})) : null) : null,
+    (!S.amzLoaded && !S.amzMissing && AZ) ? h("p",{class:"help",text:"Still loading Amazon listings…"}) : null,
     noteHits.length ? h("section",null,h("h2",{style:"margin-bottom:10px"},"Staff notes ("+noteHits.length+")"),h("div",{class:"notes"},sortedNotes(noteHits).map(noteEl))) : null,
     (!total && canWrite()) ? h("div",null,h("button",{class:"btn ghost",type:"button",text:"Add this as a FAQ",onclick:() => openFaqDialog(null, null, S.q.trim())})) : null)));
 }
@@ -486,7 +965,7 @@ let pendingJump = null;
 function render(){
   if (!S.me) return;
   const searching = S.q.trim() && terms().length;
-  const top = S.route.startsWith("p-") || S.route.startsWith("edit-") || S.route === "new-product" ? "products" : S.route.startsWith("t-") ? "faqs" : S.route;
+  const top = S.route.startsWith("p-") || S.route.startsWith("edit-") || S.route === "new-product" ? "products" : S.route.startsWith("t-") ? "faqs" : S.route.startsWith("s-") || S.route === "import-specs" ? "specs" : S.route.startsWith("a-") || S.route === "import-amazon" ? "amazon" : S.route;
   document.querySelectorAll("#nav a").forEach(a => a.classList.toggle("on", !searching && a.dataset.r === top));
   let v;
   if (searching) v = viewSearch();
@@ -497,6 +976,12 @@ function render(){
   else if (S.route.startsWith("t-")) v = viewFaqs(S.route.slice(2));
   else if (S.route === "faqs") v = viewFaqs(null);
   else if (S.route === "notes") v = viewNotes();
+  else if (S.route === "specs") v = viewSpecs();
+  else if (S.route === "import-specs") v = viewSpecImport();
+  else if (S.route.startsWith("s-")) v = viewSpec(S.route.slice(2));
+  else if (S.route === "amazon") v = viewAmazon();
+  else if (S.route === "import-amazon") v = viewAmazonImport();
+  else if (S.route.startsWith("a-")) v = viewAmazonListing(S.route.slice(2));
   else v = viewHome();
   // keep open answers, half-typed notes and focus when other people's changes arrive
   const editing = S.route.startsWith("edit-") || S.route === "new-product";
@@ -508,7 +993,7 @@ function render(){
   main.replaceChildren(...banners, v);
   open.forEach(id => { const d = id && document.getElementById(id); if (d && d.tagName === "DETAILS") d.open = true; });
   for (const [id,val] of Object.entries(drafts)){ const el = document.getElementById(id); if (el){ if (el.type === "checkbox") el.checked = val; else el.value = val; } }
-  if (actId){ const el = document.getElementById(actId); if (el) el.focus({preventScroll:true}); }
+  if (actId){ const el = document.getElementById(actId); if (el){ el.focus({preventScroll:true}); if (el.id === "specFilter" || el.id === "amzFilter") try { el.setSelectionRange(el.value.length, el.value.length); } catch {} } }
   if (editing) window.scrollTo(0, scrollY);
   if (pendingJump && !S.q){ const el = document.getElementById(pendingJump); if (el){ el.scrollIntoView(); pendingJump = null; } }
 }
@@ -519,7 +1004,7 @@ main.addEventListener("click", e => {
 
 /* ---------- routing & search ---------- */
 function readHash(){ const hsh = (location.hash || "").slice(1); S.route = /^[A-Za-z0-9-]+$/.test(hsh) ? hsh : "home"; }
-window.addEventListener("hashchange", () => { readHash(); if (S.q) resetSearch(); if (S.route !== "users") S.userEdit = null; if (!pendingJump) window.scrollTo(0,0); render(); });
+window.addEventListener("hashchange", () => { readHash(); if (S.q) resetSearch(); if (S.route !== "users") S.userEdit = null; if (S.route !== "import-specs") S.specImport = null; if (S.route !== "import-amazon") S.amzImport = null; S.amzError = null; if (!pendingJump) window.scrollTo(0,0); render(); });
 const qEl = $("#q"), clearBtn = $("#clear");
 let qt;
 qEl.addEventListener("input", () => { clearTimeout(qt); qt = setTimeout(() => { const was = !!S.q.trim(); S.q = qEl.value; clearBtn.hidden = !S.q; render(); if (!was && S.q.trim()) window.scrollTo(0,0); }, 120); });
@@ -600,6 +1085,7 @@ function signInView(msg){
     h("label",null, team ? "Team password" : "Password", pw),
     team ? h("label",null,h("span",null,"Your first name ",h("span",{class:"help",text:"shown on notes you post"})), name) : null,
     btn,
+    team ? h("button",{class:"link",type:"button",style:"align-self:flex-start",text:"Editor? Sign in with your email",onclick:() => { S.authMode = "editor"; signInView(); }}) : null,
     team ? null : h("button",{class:"link",type:"button",style:"align-self:flex-start",text:"Back to team sign-in",onclick:() => { S.authMode = "team"; signInView(); }}),
     h("p",{class:"hint",text: team ? "Don't know the team password? Ask your manager." : "Forgotten your editor password? Ask whoever set up the portal to reset it in Supabase."}));
   form.addEventListener("submit", async e => {
@@ -627,7 +1113,7 @@ async function afterSignIn(){
   const isTeam = (session.user.email || "").toLowerCase() === String(CFG.TEAM_EMAIL || "").toLowerCase();
   // Shared team login: show the person's name; never offer to change the shared password from here.
   $("#who").textContent = isTeam ? (myName() || "Team") : (session.user.email + (editor ? " · Editor" : ""));
-  $("#editorBtn").hidden = true; $("#pwBtn").hidden = isTeam || !editor;
+  $("#editorBtn").hidden = !isTeam; $("#pwBtn").hidden = isTeam || !editor;
   readHash(); render(); await load();
   startLive();
 }
@@ -635,7 +1121,7 @@ $("#signOutBtn").addEventListener("click", async () => { stopLive(); await sb.au
 $("#editorBtn").addEventListener("click", async () => { stopLive(); await sb.auth.signOut(); S.me = null; S.loaded = false; S.authMode = "editor"; signInView(); });
 
 /* ---------- live updates ---------- */
-let channel = null, poll = null;
+let channel = null, poll = null, amzReloadT;
 function startLive(){
   stopLive();
   channel = sb.channel("portal-changes")
@@ -643,6 +1129,8 @@ function startLive(){
     .on("postgres_changes", { event:"*", schema:"public", table:"faqs" }, reloadSoon)
     .on("postgres_changes", { event:"*", schema:"public", table:"products" }, reloadSoon)
     .on("postgres_changes", { event:"*", schema:"public", table:"topics" }, reloadSoon)
+    .on("postgres_changes", { event:"*", schema:"public", table:"specs" }, reloadSoon)
+    .on("postgres_changes", { event:"*", schema:"public", table:"amazon" }, () => { if (S.amzLoaded){ clearTimeout(amzReloadT); amzReloadT = setTimeout(() => { S.amzLoaded = false; S.amzText = {}; ensureAmazon(); }, 1500); } })
     .subscribe();
   poll = setInterval(() => { if (!document.hidden) load(); }, 60000); // safety net if live updates drop
 }
