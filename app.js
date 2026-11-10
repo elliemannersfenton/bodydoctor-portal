@@ -6,6 +6,7 @@ const LEVEL = { viewer:1, contributor:2, editor:3, admin:4 };
 const S = { products:[], faqs:[], notes:[], topics:[], specs:[], specsMissing:false, me:null, loaded:false, q:"", route:"home",
   noteFilter:"all", editingFaq:null, offline:false, draft:null, authMode:"team",
   specBrand:"all", specQ:"", specCheck:false, specImport:null,
+  secQ:{ products:"", faqs:"" },
   amazon:[], amzLoaded:false, amzMissing:false, amzError:null, amzQ:"", amzBrand:"all", amzStatus:"live", amzShowAll:false, amzRow:{}, amzText:{}, amzImport:null };
 const SP = window.TBDSpecs;
 const $ = (s, r=document) => r.querySelector(s);
@@ -321,9 +322,6 @@ function photoField(current, onChange){
 /* ---------- views ---------- */
 function viewHome(){
   const recent = sortedNotes(S.notes).slice(0, 4);
-  const big = h("input",{id:"bigq",type:"search",placeholder:"What is the customer asking about?","aria-label":"Search the portal",autocomplete:"off"});
-  big.addEventListener("input", () => { qEl.value = big.value; qEl.focus(); qEl.setSelectionRange(qEl.value.length, qEl.value.length); qEl.dispatchEvent(new Event("input")); });
-  const trySearch = t => h("button",{type:"button",text:t,onclick:() => { qEl.value = t; qEl.dispatchEvent(new Event("input")); qEl.focus(); }});
   const pics = S.products.map(p => safeSrc(p.photo)).filter(Boolean);
   const pic = i => pics.length ? pics[i % pics.length] : null;
   return h("div",null,
@@ -331,9 +329,8 @@ function viewHome(){
       h("div",null,
         h("div",{class:"eyebrow",text:"Customer services portal"}),
         h("h1",{style:"margin-top:12px"},"How can we help the customer today?"),
-        h("p",{class:"lede",text:"Instructions for use, approved answers, packing specs and Amazon listings in one place. Search, open the answer and copy it straight into your reply."}),
-        h("div",{class:"bigsearch"}, searchIcon(), big),
-        h("div",{class:"try"}, "Try:", ["microwave","crystals","warranty","not arrived","discount code","contact lenses"].map(trySearch))),
+        h("p",{class:"lede",text:"Instructions for use, approved answers, packing specs and Amazon listings in one place. Each section has its own search."}),
+        h("div",{class:"try jump"}, [["#products","Instructions"],["#faqs","FAQs"],["#specs","Product specs"],["#amazon","Amazon"]].map(([href, t]) => h("a",{href, text:t})))),
       pics.length ? h("div",{class:"collage","aria-hidden":"true"},
         h("figure",{class:"c1"},h("img",{src:pic(0),alt:""})),
         h("figure",{class:"c2"},h("img",{src:pic(3),alt:""})),
@@ -346,12 +343,39 @@ function viewHome(){
       h("div",{class:"band-head"},h("div",null,h("div",{class:"eyebrow",text:"Customer queries"}),h("h2",{style:"margin-top:6px"},"FAQs by product")),h("a",{href:"#faqs",text:"All "+S.faqs.length+" FAQs"})),
       S.faqs.length ? h("div",{class:"tgrid"}, categories().map(topicTile)) : loadingOr("No FAQs yet."))));
 }
+/** A search box that only searches one section (instructions or FAQs). */
+function secSearch(sec, placeholder){
+  const input = h("input",{type:"search",id:"q-"+sec,value:S.secQ[sec],placeholder,"aria-label":placeholder,autocomplete:"off"});
+  let t; input.addEventListener("input", () => { clearTimeout(t); t = setTimeout(() => { S.secQ[sec] = input.value; render(); }, 120); });
+  input.addEventListener("keydown", e => { if (e.key === "Escape" && input.value){ S.secQ[sec] = ""; render(); } });
+  return h("div",{class:"search secsearch",role:"search"}, searchIcon(), input,
+    S.secQ[sec] ? h("button",{class:"clear",type:"button","aria-label":"Clear search",text:"✕",onclick:() => { S.secQ[sec] = ""; render(); $("#q-"+sec)?.focus(); }}) : null);
+}
+const switchSearch = (sec, label) => h("a",{href:"#"+sec,onclick: e => { e.preventDefault(); S.secQ[sec] = S.q.trim(); if (S.route === sec) render(); else location.hash = sec; },text:label});
+function instructionHits(){
+  const hits = [];
+  for (const p of S.products){
+    if (matches([p.name,p.summary,p.ref,...(p.facts||[]).flat()].join(" "))) hits.push({p, title:"Overview", text:[p.summary, ...(p.facts||[]).map(f => f.join(": "))].filter(Boolean).join(" · "), jump:null});
+    p.sections.forEach((s,i) => { const t = sectionText(s); if (matches(p.name+" "+t)) hits.push({p, title:s.title || "Section "+(i+1), text:t, jump:"s"+i}); });
+  }
+  return hits;
+}
 function viewProducts(){
-  return h("section",{class:"band"},W(
-    h("div",{class:"band-head"},h("div",null,h("div",{class:"eyebrow",text:"Instructions for use"}),h("h1",{style:"margin-top:6px"},"Product instructions"),
+  const q = S.q.trim(), searching = q && terms().length;
+  const hits = searching ? instructionHits() : [];
+  return h("section",{class:"band"},W(h("div",{class:"stack",style:"gap:26px"},
+    h("div",{class:"band-head",style:"margin-bottom:0"},h("div",null,h("div",{class:"eyebrow",text:"Instructions for use"}),h("h1",{style:"margin-top:6px"},"Product instructions"),
       h("p",{class:"lede",style:"margin-top:10px",text:"Taken from the printed leaflets that go out with each product. Open a product for heating times, step-by-step use, warnings and related FAQs."})),
       canEdit() ? h("a",{class:"btn",href:"#new-product",text:"Add a product"}) : null),
-    S.products.length ? h("div",{class:"pgrid"}, S.products.map(productTile)) : loadingOr("No product instructions yet.")));
+    secSearch("products","Search instructions, e.g. microwave or crystals"),
+    !searching ? (S.products.length ? h("div",{class:"pgrid"}, S.products.map(productTile)) : loadingOr("No product instructions yet."))
+    : hits.length ? h("section",null,
+        h("p",{class:"help",style:"margin-bottom:6px",text: hits.length + " match" + (hits.length > 1 ? "es" : "") + " in the instructions"}),
+        hits.map(r => h("a",{class:"res",href:"#p-"+r.p.id,onclick: e => { e.preventDefault(); pendingJump = r.jump || null;
+            const target = "p-" + r.p.id; if (S.route === target) render(); else location.hash = target; if (!pendingJump) window.scrollTo(0,0); }},
+          photo(r.p.photo) || h("span"),
+          h("div",null,h("div",{class:"eyebrow",text:r.p.name}),h("h3",{style:"margin:2px 0 4px"},hl(r.title)),h("div",{class:"snip"},hl(snippet(r.text)))))))
+    : h("div",{class:"empty"},"Nothing in the instructions matches “" + q + "”. ", switchSearch("faqs","Search the FAQs instead"), "."))));
 }
 function viewProduct(id){
   const p = prodById(id);
@@ -361,7 +385,7 @@ function viewProduct(id){
   const jump = (target, label) => h("a",{href:"#p-"+p.id,"data-jump":target,text:label});
   const pack = productSpecBlock(p);
   return W(
-    h("div",{class:"crumbs row",style:"justify-content:space-between"},h("span",null,h("a",{href:"#home",text:"Overview"})," / ",h("a",{href:"#products",text:"Instructions"})," / ",p.name),
+    h("div",{class:"crumbs row",style:"justify-content:space-between"},h("span",null,h("a",{href:"#products",text:"Instructions"})," / ",p.name),
       canEdit() ? h("a",{class:"btn small ghost",href:"#edit-"+p.id,text:"Edit product"}) : null),
     h("div",{class:"split"},
       h("aside",null,h("div",{class:"stick"},
@@ -548,7 +572,7 @@ function viewSpec(id){
   const linked = specLinkedProducts(s);
   const variants = S.specs.filter(o => o !== s && o.data.ean && o.data.ean === d.ean);
   return W(
-    h("div",{class:"crumbs"},h("a",{href:"#home",text:"Overview"})," / ",h("a",{href:"#specs",text:"Product specs"})," / ",d.name),
+    h("div",{class:"crumbs"},h("a",{href:"#specs",text:"Product specs"})," / ",d.name),
     h("div",{class:"stack spec-page",style:"gap:26px;padding-bottom:56px;border-top:1px solid var(--line);padding-top:32px"},
       h("div",{class:"stack",style:"gap:14px"},
         h("div",{class:"eyebrow",text:[s.brand, s.family].filter(Boolean).join(" · ")}),
@@ -805,7 +829,7 @@ function viewAmazonListing(key){
     return h("details",{class:"faq spec-more",id:"amz-"+group}, h("summary",null,h("span",{class:"q",text:label})), h("div",{class:"faq-body"}, facts(rows)));
   };
   return W(
-    h("div",{class:"crumbs"},h("a",{href:"#home",text:"Overview"})," / ",h("a",{href:"#amazon",text:"Amazon"})," / ",d.product || l.name),
+    h("div",{class:"crumbs"},h("a",{href:"#amazon",text:"Amazon"})," / ",d.product || l.name),
     h("div",{class:"stack spec-page",style:"gap:26px;padding-bottom:56px;border-top:1px solid var(--line);padding-top:32px"},
       h("div",{class:"stack",style:"gap:14px"},
         h("div",{class:"eyebrow",text:[l.brand, l.code].filter(Boolean).join(" · ")}),
@@ -896,12 +920,25 @@ function viewFaqs(catSlug){
     : h("div",{class:"band-head",style:"margin-bottom:0"},h("div",null,h("div",{class:"eyebrow",text:"Customer queries"}),h("h1",{style:"margin-top:6px"},"Frequently asked questions"),
         h("p",{class:"lede",style:"margin-top:10px",text:S.faqs.length+" approved answers across "+cats.length+" topics. Open one to see the full answer and copy it into your reply."})), addBtn);
   if (catSlug && !cat && S.loaded) return h("section",{class:"band"},W(h("div",{class:"empty"},"That topic has no FAQs. ",h("a",{href:"#faqs",text:"See all FAQs"}))));
+  const q = S.q.trim(), searching = q && terms().length;
+  const shown = f => !searching || matches(faqText(f));
+  const groups = (cat ? [cat] : cats).map(g => ({ g, list: S.faqs.filter(f => f.category === g.name && shown(f)) })).filter(x => x.list.length);
+  const total = groups.reduce((n, x) => n + x.list.length, 0);
+  const elsewhere = searching && cat ? S.faqs.filter(f => f.category !== cat.name && shown(f)).length : 0;
+  const pillHref = c => c ? "#t-"+c.slug : "#faqs";
   return h("section",{class:"band"},W(h("div",{class:"stack",style:"gap:28px"},
     head,
-    h("div",{class:"pills"}, h("a",{href:"#faqs",class:cat ? null : "on",text:"All"}), cats.map(c => h("a",{href:"#t-"+c.slug,class:cat?.slug === c.slug ? "on" : null,text:c.name}))),
-    S.faqs.length ? (cat ? [cat] : cats).map(g => h("section",{class:"group",id:"g-"+g.slug}, cat ? null : h("h2",{style:"font-size:1.4rem;margin-bottom:6px"},g.name),
-        h("div",{class:"faqs"}, S.faqs.filter(f => f.category === g.name).map(f => faqEl(f)))))
-      : loadingOr("No FAQs yet."))));
+    secSearch("faqs", cat ? "Search " + cat.name + " FAQs" : "Search all FAQs, e.g. warranty or not arrived"),
+    h("div",{class:"pills"}, h("a",{href:pillHref(null),class:cat ? null : "on",text:"All"}), cats.map(c => h("a",{href:pillHref(c),class:cat?.slug === c.slug ? "on" : null,text:c.name}))),
+    searching ? h("p",{class:"help"}, total ? total + (total > 1 ? " FAQs match “" : " FAQ matches “") + q + "”" + (cat ? " in " + cat.name : "") + ". " : "",
+      elsewhere ? h("a",{href:"#faqs",text: elsewhere + " more in other topics"}) : null) : null,
+    !S.faqs.length ? loadingOr("No FAQs yet.")
+    : total ? groups.map(({g, list}) => h("section",{class:"group",id:"g-"+g.slug}, cat ? null : h("h2",{style:"font-size:1.4rem;margin-bottom:6px"},g.name),
+        h("div",{class:"faqs"}, list.map(f => faqEl(f, searching && total <= 3)))))
+    : h("div",{class:"empty"}, "No FAQs match “" + q + "”" + (cat ? " in " + cat.name : "") + ". ",
+        elsewhere ? [h("a",{href:"#faqs",text:"See " + elsewhere + " in other topics"}), " · "] : null,
+        switchSearch("products","Search the instructions instead"),
+        canWrite() ? [" · ", h("button",{class:"link",type:"button",text:"Add this as a FAQ",onclick:() => openFaqDialog(null, cat?.name, q)})] : null))));
 }
 function viewNotes(){
   const topics = [...new Set(S.notes.map(n => n.topic || "general"))];
@@ -957,12 +994,12 @@ function viewSearch(){
 let pendingJump = null;
 function render(){
   if (!S.me) return;
-  const searching = S.q.trim() && terms().length;
+  const sec0 = S.route.startsWith("p-") || S.route === "products" ? "products" : S.route.startsWith("t-") || S.route === "faqs" ? "faqs" : null;
+  S.q = sec0 ? S.secQ[sec0] || "" : "";
   const top = S.route.startsWith("p-") || S.route.startsWith("edit-") || S.route === "new-product" ? "products" : S.route.startsWith("t-") ? "faqs" : S.route.startsWith("s-") || S.route === "import-specs" ? "specs" : S.route.startsWith("a-") || S.route === "import-amazon" ? "amazon" : S.route;
-  document.querySelectorAll("#nav a").forEach(a => a.classList.toggle("on", !searching && a.dataset.r === top));
+  document.querySelectorAll("#nav a").forEach(a => a.classList.toggle("on", a.dataset.r === top));
   let v;
-  if (searching) v = viewSearch();
-  else if (S.route === "products") v = viewProducts();
+  if (S.route === "products") v = viewProducts();
   else if (S.route === "new-product") v = viewProductEditor(null);
   else if (S.route.startsWith("edit-")) v = viewProductEditor(S.route.slice(5));
   else if (S.route.startsWith("p-")) v = viewProduct(S.route.slice(2));
@@ -975,7 +1012,7 @@ function render(){
   else if (S.route === "amazon") v = viewAmazon();
   else if (S.route === "import-amazon") v = viewAmazonImport();
   else if (S.route.startsWith("a-")) v = viewAmazonListing(S.route.slice(2));
-  else v = viewHome();
+  else v = viewProducts();
   // keep open answers, half-typed notes and focus when other people's changes arrive
   const editing = S.route.startsWith("edit-") || S.route === "new-product";
   const open = new Set([...main.querySelectorAll("details[open]")].map(d => d.id));
@@ -986,9 +1023,9 @@ function render(){
   main.replaceChildren(...banners, v);
   open.forEach(id => { const d = id && document.getElementById(id); if (d && d.tagName === "DETAILS") d.open = true; });
   for (const [id,val] of Object.entries(drafts)){ const el = document.getElementById(id); if (el){ if (el.type === "checkbox") el.checked = val; else el.value = val; } }
-  if (actId){ const el = document.getElementById(actId); if (el){ el.focus({preventScroll:true}); if (el.id === "specFilter" || el.id === "amzFilter") try { el.setSelectionRange(el.value.length, el.value.length); } catch {} } }
+  if (actId){ const el = document.getElementById(actId); if (el){ el.focus({preventScroll:true}); if (el.id === "specFilter" || el.id === "amzFilter" || el.id.startsWith("q-")) try { el.setSelectionRange(el.value.length, el.value.length); } catch {} } }
   if (editing) window.scrollTo(0, scrollY);
-  if (pendingJump && !S.q){ const el = document.getElementById(pendingJump); if (el){ el.scrollIntoView(); pendingJump = null; } }
+  if (pendingJump){ const el = document.getElementById(pendingJump); if (el){ el.scrollIntoView(); pendingJump = null; } }
 }
 main.addEventListener("click", e => {
   const a = e.target.closest("[data-jump]"); if (!a) return;
@@ -996,15 +1033,11 @@ main.addEventListener("click", e => {
 });
 
 /* ---------- routing & search ---------- */
-function readHash(){ const hsh = (location.hash || "").slice(1); S.route = /^[A-Za-z0-9-]+$/.test(hsh) ? hsh : "home"; }
-window.addEventListener("hashchange", () => { readHash(); if (S.q) resetSearch(); if (S.route !== "users") S.userEdit = null; if (S.route !== "import-specs") S.specImport = null; if (S.route !== "import-amazon") S.amzImport = null; S.amzError = null; if (!pendingJump) window.scrollTo(0,0); render(); });
-const qEl = $("#q"), clearBtn = $("#clear");
-let qt;
-qEl.addEventListener("input", () => { clearTimeout(qt); qt = setTimeout(() => { const was = !!S.q.trim(); S.q = qEl.value; clearBtn.hidden = !S.q; render(); if (!was && S.q.trim()) window.scrollTo(0,0); }, 120); });
-qEl.addEventListener("keydown", e => { if (e.key === "Escape"){ resetSearch(); render(); } });
-function resetSearch(){ qEl.value = ""; S.q = ""; clearBtn.hidden = true; }
-clearBtn.addEventListener("click", () => { resetSearch(); render(); qEl.focus(); });
-document.addEventListener("keydown", e => { if (e.key === "/" && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName)){ e.preventDefault(); qEl.focus(); } });
+function readHash(){ const hsh = (location.hash || "").slice(1); S.route = /^[A-Za-z0-9-]+$/.test(hsh) && hsh !== "home" ? hsh : "products"; }
+window.addEventListener("hashchange", () => { readHash(); if (S.route !== "users") S.userEdit = null; if (S.route !== "import-specs") S.specImport = null; if (S.route !== "import-amazon") S.amzImport = null; S.amzError = null; if (!pendingJump) window.scrollTo(0,0); render(); });
+function resetSearch(){}
+// "/" jumps to the search box on the current page.
+document.addEventListener("keydown", e => { if (e.key === "/" && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName)){ const el = main.querySelector('[id^="q-"],#specFilter,#amzFilter'); if (el){ e.preventDefault(); el.focus(); } } });
 document.querySelectorAll("dialog [data-close]").forEach(b => b.addEventListener("click", () => b.closest("dialog").close()));
 const showDlg = d => { try { d.showModal(); } catch { d.setAttribute("open",""); } };
 
@@ -1071,7 +1104,7 @@ function signInView(msg){
   const btn = h("button",{class:"btn",type:"submit",text: team ? "Open the portal" : "Sign in as editor"});
   const form = h("form",{class:"auth-card"},
     h("span",{class:"mark logo",role:"img","aria-label":"The Body Doctor"},h("i",{class:"ink"}),h("i",{class:"grn"})),
-    h("h1",{text: team ? "Customer Query Portal" : "Editor sign-in"}),
+    h("h1",{text: team ? "Product Library" : "Editor sign-in"}),
     h("p",{class:"lede",text: team ? "Enter the team password. You only need to do this once on each computer." : "Editors can change products, FAQs and topics."}),
     err,
     team ? null : h("label",null,"Email", email),

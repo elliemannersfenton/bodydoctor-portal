@@ -367,3 +367,13 @@ body.auth{min-height:100vh;display:flex;flex-direction:column;background:var(--b
 .amz-desc{white-space:pre-wrap;font-size:.95rem;color:var(--muted)}
 .spec-bar .row > input{max-width:420px;flex:1 1 260px}
 .spec-bar .row > select{width:auto;min-width:180px}
+
+/* section search */
+header.top .wrap{grid-template-columns:auto 1fr auto}
+.secsearch{width:min(560px,100%)}
+.secsearch input{padding-block:13px;font-size:1rem}
+.secsearch input::-webkit-search-cancel-button{display:none}
+.hero .try.jump{margin-top:28px}
+.hero .try.jump a{border:1px solid rgb(255 255 255 / .28);color:var(--hero-ink);border-radius:999px;padding:10px 20px;text-decoration:none;font-size:.95rem}
+.hero .try.jump a:hover{border-color:var(--brand);color:var(--brand)}
+@media (max-width:760px){ header.top .wrap{grid-template-columns:auto 1fr} }
