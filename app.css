@@ -377,3 +377,46 @@ header.top .wrap{grid-template-columns:auto 1fr auto}
 .hero .try.jump a{border:1px solid rgb(255 255 255 / .28);color:var(--hero-ink);border-radius:999px;padding:10px 20px;text-decoration:none;font-size:.95rem}
 .hero .try.jump a:hover{border-color:var(--brand);color:var(--brand)}
 @media (max-width:760px){ header.top .wrap{grid-template-columns:auto 1fr} }
+
+/* handbook */
+.tabs{display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid var(--line)}
+.tabs a{padding:10px 14px;color:var(--muted);text-decoration:none;font-weight:500;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs a:hover{color:var(--ink)}
+.tabs a.on{color:var(--ink);border-bottom-color:var(--brand)}
+.chip.draft{background:var(--warn-soft);color:var(--warn);font-size:.74rem}
+.hb-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.hb-card{text-decoration:none;color:var(--ink);border:1px solid transparent;transition:border-color .15s}
+.hb-card:hover{border-color:var(--ink)}
+.hb-card .more{margin-top:auto;font-size:.8rem;font-weight:500;letter-spacing:.08em;text-transform:uppercase;border-bottom:1.5px solid var(--brand);align-self:flex-start;padding-bottom:2px}
+.brand-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.card p{max-width:none}
+.checklist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px;counter-reset:c}
+.checklist li{padding:10px 0;border-bottom:1px solid var(--line)}
+.checklist li label{font-size:1rem;align-items:flex-start;gap:12px}
+.checklist li input{margin-top:5px;width:18px;height:18px;accent-color:var(--slate)}
+.checklist li.done span{color:var(--muted);text-decoration:line-through}
+.finder{display:flex;flex-direction:column;gap:20px;padding:24px;background:var(--bg2)}
+.lead-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}
+.lead-card{display:grid;grid-template-columns:96px 1fr;gap:14px;align-items:center;background:var(--bg);padding:12px;text-decoration:none;color:var(--ink);border:1px solid transparent}
+.lead-card:hover{border-color:var(--ink)}
+.lead-card .photo{width:96px}
+.lead-card .more{font-size:.78rem;font-weight:500;letter-spacing:.08em;text-transform:uppercase;border-bottom:1.5px solid var(--brand);align-self:flex-start;padding-bottom:2px}
+.range-list{display:flex;flex-wrap:wrap;gap:8px}
+.range-item{display:inline-flex;gap:8px;align-items:baseline;background:var(--bg);border:1px solid var(--line);padding:8px 12px;text-decoration:none;color:var(--ink);font-size:.92rem}
+.range-item:hover{border-color:var(--ink)}
+.range-item .mono{color:var(--muted)}
+.gloss{margin:0;border-top:1px solid var(--line)}
+.gloss div{display:grid;grid-template-columns:minmax(180px,1fr) 3fr;gap:20px;padding:14px 0;border-bottom:1px solid var(--line)}
+.gloss dt{font-weight:500}
+.gloss dd{margin:0;color:var(--ink);max-width:75ch}
+.card.do{border-top:3px solid var(--brand)}
+.card.dont{border-top:3px solid var(--danger)}
+.callout.urgent{border-left-color:var(--danger);display:flex;flex-direction:column;gap:10px;max-width:none}
+.callout.urgent h3{font-size:1.05rem}
+.contacts td{vertical-align:middle}
+@media (max-width:1020px){ .hb-grid,.brand-grid{grid-template-columns:repeat(2,minmax(0,1fr))} }
+@media (max-width:760px){ .hb-grid,.brand-grid{grid-template-columns:minmax(0,1fr)} .gloss div{grid-template-columns:minmax(0,1fr);gap:4px} .tabs{flex-wrap:nowrap;overflow-x:auto} .tabs a{white-space:nowrap} .finder{padding:16px} }
+.card.dont ul.bul li::marker,.callout.urgent ul.bul li::marker{color:var(--danger)}
+.lead-grid{grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
+.lead-card{grid-template-columns:80px 1fr}
+.lead-card .photo{width:80px}

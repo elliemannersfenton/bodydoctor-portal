@@ -908,6 +908,113 @@ function viewAmazonImport(){
       h("div",{class:"row"}, save, h("button",{class:"btn ghost",type:"button",text:"Cancel",onclick:() => { S.amzImport = null; render(); }}), msg)) : null)));
 }
 
+/* ---------- handbook (all staff) ---------- */
+const ST = window.TBDStarter;
+const STARTER_PAGES = [["handbook","Summary"],["about","About us"],["finder","Product finder"],["glossary","Glossary"],["say","What we can say"],["howto","How-to guides"],["contacts","Who to ask"]];
+const isStarter = r => STARTER_PAGES.some(([k]) => k === r);
+const draftChip = () => h("span",{class:"chip draft",text:"Draft · to confirm"});
+function starterShell(key, eyebrow, title, lede, ...body){
+  return h("section",{class:"band"},W(h("div",{class:"stack",style:"gap:26px"},
+    h("nav",{class:"tabs","aria-label":"Handbook"}, STARTER_PAGES.map(([k, label]) => h("a",{href:"#"+k,class: k === key ? "on" : null,text:label}))),
+    h("div",null,h("div",{class:"eyebrow",text:eyebrow}),h("h1",{style:"margin-top:6px",text:title}), lede ? h("p",{class:"lede",style:"margin-top:10px",text:lede}) : null),
+    ...body)));
+}
+function viewHandbook(){
+  const key = "tbd-week";
+  let done = {}; try { done = JSON.parse(store.get(key) || "{}") || {}; } catch {}
+  const n = ST.firstWeek.filter((_, i) => done[i]).length;
+  const tick = h("ol",{class:"checklist"}, ST.firstWeek.map((t, i) => {
+    const cb = h("input",{type:"checkbox",id:"wk"+i,checked: done[i] || null});
+    cb.addEventListener("change", () => { done[i] = cb.checked; store.set(key, JSON.stringify(done)); render(); });
+    return h("li",{class: done[i] ? "done" : null}, h("label",{class:"inline",for:"wk"+i}, cb, h("span",{text:t})));
+  }));
+  const card = (k, title, text, extra) => h("a",{class:"card hb-card",href:"#"+k}, h("h3",{text:title}), h("p",{text:text}), extra || null, h("span",{class:"more",text:"Open " + title}));
+  return starterShell("handbook","Handbook","How we work","What we sell, how to talk to customers about it, and who to ask. For everyone in the team.",
+    h("div",{class:"hb-grid"},
+      card("about","About us", ST.brands.length + " brands and the ways we sell them: direct, wholesale and Amazon.", h("p",{class:"help",text:ST.brands.map(b => b.name).join(" · ")})),
+      card("finder","Product finder","Which products are designed for which eye condition, backed by their leaflets.", h("p",{class:"help",text:ST.conditions.map(c => c.name).join(" · ")})),
+      card("glossary","Glossary", ST.glossary.length + " terms in plain English, from MGD to FNSKU."),
+      card("say","What we can say","The medical advice limits for our products, and when to send a customer for urgent help.", h("p",{class:"help",text:"Never diagnose. Escalate sudden vision loss, severe pain or eye injuries."})),
+      card("howto","How-to guides", ST.howtos.length + " step-by-step guides for everyday jobs, from late orders to reporting an incident."),
+      card("contacts","Who to ask","Who looks after discount codes, replacements, trade, Amazon and more.")),
+    h("details",{class:"faq spec-more",id:"hb-week"},
+      h("summary",null,h("span",{class:"q"},"New to the team? Your first-week checklist ",h("span",{class:"help",text:"(" + n + " of " + ST.firstWeek.length + " done, saved on this computer)"}))),
+      h("div",{class:"faq-body"}, tick)));
+}
+function viewAbout(){
+  const count = b => b.specs ? S.specs.filter(s => s.brand === b.specs).length : 0;
+  return starterShell("about","Handbook","About us","The Body Doctor's brands and how we sell them.",
+    h("section",{class:"stack",style:"gap:12px"},
+      h("h2",{style:"font-size:1.35rem",text:"Our brands"}),
+      h("div",{class:"brand-grid"}, ST.brands.map(b => h("div",{class:"card"},
+        h("h3",{text:b.name}), h("p",{text:b.what}), h("p",{class:"help",text:"For example: " + b.examples}),
+        count(b) ? h("a",{href:"#specs",onclick:e => { e.preventDefault(); S.specBrand = b.specs; S.specQ = ""; location.hash = "specs"; },text:count(b) + " products in Product specs →"}) : null)))),
+    h("section",{class:"stack",style:"gap:12px"},
+      h("h2",{style:"font-size:1.35rem",text:"How we sell"}),
+      h("div",{class:"brand-grid three"}, ST.channels.map(c => h("div",{class:"card"}, h("div",{class:"row",style:"justify-content:space-between"},h("h3",{text:c.name}), c.check ? draftChip() : null), h("p",{text:c.what}))))));
+}
+function specLink(sku){
+  const s = S.specs.find(x => x.sku.toUpperCase() === sku.toUpperCase());
+  return s ? h("a",{class:"range-item",href:"#s-"+specId(s.sku)}, h("span",{class:"mono",text:s.sku}), h("span",{text:s.data.name})) : null;
+}
+function viewFinder(){
+  const sel = S.finder || ST.conditions[0].id;
+  const c = ST.conditions.find(x => x.id === sel) || ST.conditions[0];
+  return starterShell("finder","Handbook","Product finder","Pick what the customer describes to see which products are designed for it. Lead products are backed by their instruction leaflets.",
+    h("div",{class:"pills"}, ST.conditions.map(x => h("button",{type:"button","aria-pressed":String(x.id === c.id),text:x.name,onclick:() => { S.finder = x.id; render(); }}))),
+    h("section",{class:"finder"},
+      h("div",{class:"stack",style:"gap:6px"},h("h2",{text:c.name}),h("p",{class:"lede",text:c.plain})),
+      c.lead.length ? h("div",{class:"lead-grid"}, c.lead.map(([pid, why]) => { const p = prodById(pid); return p ? h("a",{class:"lead-card",href:"#p-"+pid},
+        photo(p.photo, p.name) || h("div",{class:"photo"}), h("div",{class:"stack",style:"gap:6px"},h("b",{text:p.name}),h("span",{text:why}),h("span",{class:"more",text:"View instructions"}))) : null; })) : null,
+      c.note ? h("div",{class:"callout",text:c.note}) : null,
+      c.range.length ? h("div",{class:"stack",style:"gap:10px"},
+        h("div",{class:"row",style:"gap:10px"},h("h3",{text:"Also in the range"}),h("span",{class:"help",text:"Matched by product name. Check the leaflet before recommending."})),
+        h("div",{class:"range-list"}, c.range.map(specLink))) : null),
+    h("div",{class:"status"},"Symptoms severe, sudden or getting worse? Don't recommend a product. ",h("a",{href:"#say",text:"See when to escalate"}),"."));
+}
+function viewGlossary(){
+  const q = (S.glossQ || "").trim().toLowerCase();
+  const input = h("input",{type:"search",id:"q-gloss",value:S.glossQ || "",placeholder:"Search the glossary, e.g. MGD or FNSKU","aria-label":"Search the glossary",autocomplete:"off"});
+  let t; input.addEventListener("input", () => { clearTimeout(t); t = setTimeout(() => { S.glossQ = input.value; render(); }, 120); });
+  const list = ST.glossary.filter(([g, term, def]) => !q || (term + " " + def).toLowerCase().includes(q));
+  const groups = [...new Set(ST.glossary.map(x => x[0]))];
+  const mark = txt => { if (!q) return txt; const i = txt.toLowerCase().indexOf(q); return i < 0 ? txt : [txt.slice(0,i), h("mark",{text:txt.slice(i, i + q.length)}), txt.slice(i + q.length)]; };
+  return starterShell("glossary","Handbook","Glossary","The terms used across the business, in plain English.",
+    h("div",{class:"search secsearch",role:"search"}, searchIcon(), input),
+    list.length ? groups.map(g => { const rows = list.filter(x => x[0] === g); return rows.length ? h("section",{class:"group"},
+      h("h2",{style:"font-size:1.3rem;margin-bottom:6px",text:g}),
+      h("dl",{class:"gloss"}, rows.map(([, term, def]) => h("div",null,h("dt",null,mark(term)),h("dd",null,mark(def)))))) : null; })
+      : h("div",{class:"empty",text:"Nothing matches. Ask your manager, and we'll add it."}));
+}
+function viewSay(){
+  return starterShell("say","Handbook","What we can and can't say","Several of our products are medical devices. These rules keep customers safe and protect you and the business.",
+    h("div",null,draftChip()),
+    h("div",{class:"grid2"},
+      h("section",{class:"card do"},h("h3",null,"We can"),h("ul",{class:"bul"}, ST.sayDo.map(x => h("li",{text:x})))),
+      h("section",{class:"card dont"},h("h3",null,"We don't"),h("ul",{class:"bul"}, ST.sayDont.map(x => h("li",{text:x}))))),
+    h("section",{class:"callout urgent"},
+      h("h3",{text:"Tell the customer to get urgent help today if they mention:"}),
+      h("ul",{class:"bul"}, ST.redFlags.map(x => h("li",{text:x}))),
+      h("p",{text:"Advise an optometrist today, NHS 111, or A&E for injuries and sudden loss of vision. Don't suggest a product. Tell your manager afterwards."})),
+    h("section",{class:"stack",style:"gap:10px"},
+      h("h2",{style:"font-size:1.35rem",text:"If something went wrong with a product"}),
+      h("ol",{class:"steps"}, ["Thank the customer and take it seriously. Don't argue about the cause.","Write down their name and contact details, the product, the batch or lot number, where they bought it, and what happened.","Ask them to keep the product and packaging.","Tell your manager the same day.","Serious incidents are reported to the manufacturer and to the MHRA. Your manager decides this with the content owner."].map(x => h("li",null,h("span",{text:x}))))));
+}
+function viewHowto(){
+  return starterShell("howto","Handbook","How-to guides","Step-by-step guides for everyday jobs. These are outlines to fill in: each shows what we already know.",
+    h("div",{class:"faqs"}, ST.howtos.map((g, i) => h("details",{class:"faq",id:"ht"+i},
+      h("summary",null,h("span",{class:"q"}, g.title, " ", h("span",{class:"chip",text:g.topic}))),
+      h("div",{class:"faq-body"},
+        g.known.length ? h("ol",{class:"steps"}, g.known.map(x => h("li",null,h("span",{text:x})))) : h("p",{class:"help",text:"No steps written yet."}),
+        h("div",{class:"row"}, draftChip(), h("span",{class:"help",text:"Steps to be written by the team lead for this area."})))))));
+}
+function viewContacts(){
+  return starterShell("contacts","Handbook","Who to ask","Who looks after what. If you're not sure, ask your manager.",
+    h("div",{class:"tbl"},h("table",{class:"spec-table contacts"},
+      h("thead",null,h("tr",null,h("th",{text:"For"}),h("th",{text:"Who"}),h("th",{text:"How to reach them"}))),
+      h("tbody",null, ST.contacts.map(c => h("tr",null, h("td",{text:c.topic}), h("td",null, c.who, c.check ? [" ", draftChip()] : null), h("td",{class: c.how ? null : "gap",text:c.how || "To confirm"})))))));
+}
+
 function viewFaqs(catSlug){
   const cats = categories();
   const cat = catSlug ? cats.find(c => c.slug === catSlug) : null;
@@ -996,7 +1103,7 @@ function render(){
   if (!S.me) return;
   const sec0 = S.route.startsWith("p-") || S.route === "products" ? "products" : S.route.startsWith("t-") || S.route === "faqs" ? "faqs" : null;
   S.q = sec0 ? S.secQ[sec0] || "" : "";
-  const top = S.route.startsWith("p-") || S.route.startsWith("edit-") || S.route === "new-product" ? "products" : S.route.startsWith("t-") ? "faqs" : S.route.startsWith("s-") || S.route === "import-specs" ? "specs" : S.route.startsWith("a-") || S.route === "import-amazon" ? "amazon" : S.route;
+  const top = S.route.startsWith("p-") || S.route.startsWith("edit-") || S.route === "new-product" ? "products" : S.route.startsWith("t-") ? "faqs" : S.route.startsWith("s-") || S.route === "import-specs" ? "specs" : S.route.startsWith("a-") || S.route === "import-amazon" ? "amazon" : isStarter(S.route) ? "handbook" : S.route;
   document.querySelectorAll("#nav a").forEach(a => a.classList.toggle("on", a.dataset.r === top));
   let v;
   if (S.route === "products") v = viewProducts();
@@ -1010,6 +1117,13 @@ function render(){
   else if (S.route === "import-specs") v = viewSpecImport();
   else if (S.route.startsWith("s-")) v = viewSpec(S.route.slice(2));
   else if (S.route === "amazon") v = viewAmazon();
+  else if (S.route === "handbook") v = viewHandbook();
+  else if (S.route === "about") v = viewAbout();
+  else if (S.route === "finder") v = viewFinder();
+  else if (S.route === "glossary") v = viewGlossary();
+  else if (S.route === "say") v = viewSay();
+  else if (S.route === "howto") v = viewHowto();
+  else if (S.route === "contacts") v = viewContacts();
   else if (S.route === "import-amazon") v = viewAmazonImport();
   else if (S.route.startsWith("a-")) v = viewAmazonListing(S.route.slice(2));
   else v = viewProducts();
@@ -1023,7 +1137,7 @@ function render(){
   main.replaceChildren(...banners, v);
   open.forEach(id => { const d = id && document.getElementById(id); if (d && d.tagName === "DETAILS") d.open = true; });
   for (const [id,val] of Object.entries(drafts)){ const el = document.getElementById(id); if (el){ if (el.type === "checkbox") el.checked = val; else el.value = val; } }
-  if (actId){ const el = document.getElementById(actId); if (el){ el.focus({preventScroll:true}); if (el.id === "specFilter" || el.id === "amzFilter" || el.id.startsWith("q-")) try { el.setSelectionRange(el.value.length, el.value.length); } catch {} } }
+  if (actId){ const el = document.getElementById(actId); if (el){ el.focus({preventScroll:true}); if (el.id === "specFilter" || el.id === "amzFilter" || el.id.startsWith("q-") || el.id === "q-gloss") try { el.setSelectionRange(el.value.length, el.value.length); } catch {} } }
   if (editing) window.scrollTo(0, scrollY);
   if (pendingJump){ const el = document.getElementById(pendingJump); if (el){ el.scrollIntoView(); pendingJump = null; } }
 }
