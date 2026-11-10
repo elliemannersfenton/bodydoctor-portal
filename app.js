@@ -116,7 +116,7 @@ async function load(){
         sb.from("products").select("*").order("sort").order("name"),
         sb.from("faqs").select("*").order("sort").order("id"),
         sb.from("topics").select("*"),
-        sb.from("notes").select("*").order("created_at", { ascending:false }).limit(1000)]);
+        Promise.resolve({ data: [], error: null })]);
       rowsToState(chk(p), chk(f), chk(t), chk(n));
       await loadSpecs();
       S.loaded = true; S.offline = false;
@@ -331,7 +331,7 @@ function viewHome(){
       h("div",null,
         h("div",{class:"eyebrow",text:"Customer services portal"}),
         h("h1",{style:"margin-top:12px"},"How can we help the customer today?"),
-        h("p",{class:"lede",text:"Instructions for use, approved answers and team notes for every product in one place. Search, open the answer and copy it straight into your reply."}),
+        h("p",{class:"lede",text:"Instructions for use, approved answers, packing specs and Amazon listings in one place. Search, open the answer and copy it straight into your reply."}),
         h("div",{class:"bigsearch"}, searchIcon(), big),
         h("div",{class:"try"}, "Try:", ["microwave","crystals","warranty","not arrived","discount code","contact lenses"].map(trySearch))),
       pics.length ? h("div",{class:"collage","aria-hidden":"true"},
@@ -344,10 +344,7 @@ function viewHome(){
       S.products.length ? h("div",{class:"pgrid"}, S.products.map(productTile)) : loadingOr("No product instructions yet."))),
     h("section",{class:"band alt"},W(
       h("div",{class:"band-head"},h("div",null,h("div",{class:"eyebrow",text:"Customer queries"}),h("h2",{style:"margin-top:6px"},"FAQs by product")),h("a",{href:"#faqs",text:"All "+S.faqs.length+" FAQs"})),
-      S.faqs.length ? h("div",{class:"tgrid"}, categories().map(topicTile)) : loadingOr("No FAQs yet."))),
-    h("section",{class:"band"},W(
-      h("div",{class:"band-head"},h("div",null,h("div",{class:"eyebrow",text:"From the team"}),h("h2",{style:"margin-top:6px"},"Latest staff notes")),h("a",{href:"#notes",text:"Notice board"})),
-      recent.length ? h("div",{class:"notes"}, recent.map(noteEl)) : h("div",{class:"empty",text: S.loaded ? "No staff notes yet. Post the first one on the notice board, or on any product page." : "Loading notes…"}))));
+      S.faqs.length ? h("div",{class:"tgrid"}, categories().map(topicTile)) : loadingOr("No FAQs yet."))));
 }
 function viewProducts(){
   return h("section",{class:"band"},W(
@@ -371,7 +368,7 @@ function viewProduct(id){
         photo(p.photo, p.name),
         p.facts?.length ? h("dl",{class:"facts"}, p.facts.map(([k,v]) => h("div",null,h("dt",{text:k}),h("dd",{text:v})))) : null,
         h("div",null,h("div",{class:"eyebrow",style:"margin-bottom:8px",text:"On this page"}),
-          h("nav",{class:"toc"}, p.sections.map((s,i) => jump("s"+i, s.title || "Section "+(i+1))), pack ? jump("pack","Packing and pallet") : null, related.length ? jump("rel","Related FAQs ("+related.length+")") : null, jump("pnotes","Staff notes"+(notes.length?" ("+notes.length+")":"")))))),
+          h("nav",{class:"toc"}, p.sections.map((s,i) => jump("s"+i, s.title || "Section "+(i+1))), pack ? jump("pack","Packing and pallet") : null, related.length ? jump("rel","Related FAQs ("+related.length+")") : null)))),
       h("div",null,
         h("div",{class:"stack",style:"gap:14px;padding-bottom:12px"},
           h("div",{class:"eyebrow",text:[p.family, "Instructions for use"].filter(Boolean).join(" · ")}),
@@ -380,10 +377,7 @@ function viewProduct(id){
           p.summary ? h("p",{class:"lede"},hl(p.summary)) : null),
         p.sections.map((s,i) => sectionEl(s, "s"+i)),
         pack,
-        related.length ? h("section",{class:"sec",id:"rel"},h("h2",null,"Related FAQs"),h("div",{class:"faqs"},related.map(f => faqEl(f)))) : null,
-        h("section",{class:"sec",id:"pnotes",style:"border-bottom:0"},h("h2",null,"Staff notes"),
-          notes.length ? h("div",{class:"notes"},notes.map(noteEl)) : h("p",{class:"lede",text:"No notes yet. Add anything customers keep asking that isn't covered above."}),
-          noteForm("p:"+p.id)))));
+        related.length ? h("section",{class:"sec",id:"rel",style:"border-bottom:0"},h("h2",null,"Related FAQs"),h("div",{class:"faqs"},related.map(f => faqEl(f)))) : null)));
 }
 
 /* product editor */
@@ -907,8 +901,7 @@ function viewFaqs(catSlug){
     h("div",{class:"pills"}, h("a",{href:"#faqs",class:cat ? null : "on",text:"All"}), cats.map(c => h("a",{href:"#t-"+c.slug,class:cat?.slug === c.slug ? "on" : null,text:c.name}))),
     S.faqs.length ? (cat ? [cat] : cats).map(g => h("section",{class:"group",id:"g-"+g.slug}, cat ? null : h("h2",{style:"font-size:1.4rem;margin-bottom:6px"},g.name),
         h("div",{class:"faqs"}, S.faqs.filter(f => f.category === g.name).map(f => faqEl(f)))))
-      : loadingOr("No FAQs yet."),
-    cat ? h("section",{class:"stack",style:"gap:14px;margin-top:20px"},h("h2",null,"Staff notes on "+cat.name), notes.length ? h("div",{class:"notes"},notes.map(noteEl)) : null, noteForm("c:"+cat.name)) : null)));
+      : loadingOr("No FAQs yet."))));
 }
 function viewNotes(){
   const topics = [...new Set(S.notes.map(n => n.topic || "general"))];
@@ -928,7 +921,7 @@ function viewSearch(){
     p.sections.forEach((s,i) => { const t = sectionText(s); if (matches(p.name+" "+t)) prodHits.push({p, title:s.title, text:t, jump:"s"+i}); });
   }
   const faqHits = S.faqs.filter(f => matches(faqText(f)));
-  const noteHits = S.notes.filter(n => matches(n.text + " " + topicLabel(n.topic)));
+  const noteHits = [];
   const specHits = SP ? S.specs.filter(s => matches(SP.searchText(s))) : [];
   ensureAmazon();
   const amzHits = amazonSearchHits();
@@ -975,7 +968,7 @@ function render(){
   else if (S.route.startsWith("p-")) v = viewProduct(S.route.slice(2));
   else if (S.route.startsWith("t-")) v = viewFaqs(S.route.slice(2));
   else if (S.route === "faqs") v = viewFaqs(null);
-  else if (S.route === "notes") v = viewNotes();
+
   else if (S.route === "specs") v = viewSpecs();
   else if (S.route === "import-specs") v = viewSpecImport();
   else if (S.route.startsWith("s-")) v = viewSpec(S.route.slice(2));
@@ -1125,7 +1118,6 @@ let channel = null, poll = null, amzReloadT;
 function startLive(){
   stopLive();
   channel = sb.channel("portal-changes")
-    .on("postgres_changes", { event:"*", schema:"public", table:"notes" }, reloadSoon)
     .on("postgres_changes", { event:"*", schema:"public", table:"faqs" }, reloadSoon)
     .on("postgres_changes", { event:"*", schema:"public", table:"products" }, reloadSoon)
     .on("postgres_changes", { event:"*", schema:"public", table:"topics" }, reloadSoon)
